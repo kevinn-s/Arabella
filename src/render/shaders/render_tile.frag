@@ -106,6 +106,9 @@ void read_segment(uint seg_offset, out vec2 p0, out vec2 p1, out vec2 p2) {
 // the sign of (U^2 - V), we can flawlessly determine if the pixel is to the 
 // right or left of the curve without any square roots.
 
+// ============================================================================
+// Extended Implicit Geometry (Strict Bounding)
+// ============================================================================
 float quad_implicit_contribution(vec2 p0, vec2 p1, vec2 p2, vec2 pixel) {
     float y_min, y_max, sign_v;
     if (p2.y > p0.y) {
@@ -116,48 +119,71 @@ float quad_implicit_contribution(vec2 p0, vec2 p1, vec2 p2, vec2 pixel) {
         return 0.0;
     }
 
+    // Half-open interval prevents double-counting winding where segments connect
     if (pixel.y < y_min || pixel.y >= y_max) {
         return 0.0;
     }
 
-    // 1. Where is the pixel relative to the straight Chord (P0 -> P2)?
+    // 1. Calculate X on the Chord (straight line P0 -> P2)
     float t_chord = (pixel.y - p0.y) / (p2.y - p0.y);
     float x_chord = p0.x + t_chord * (p2.x - p0.x);
-    bool right_of_chord = pixel.x > x_chord;
 
-    // 2. Degenerate triangle check (Area ~ 0)
-    // If the control points form a straight line, just use the chord test.
-    float denom = (p1.y - p2.y) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.y - p2.y);
-    if (abs(denom) < 1e-6) {
-        return right_of_chord ? sign_v : 0.0;
+    // 2. Calculate X on the Control Legs (P0 -> P1 -> P2)
+    float x_leg;
+    bool on_first_leg = (sign_v > 0.0) ? (pixel.y < p1.y) : (pixel.y > p1.y);
+    
+    if (on_first_leg) {
+        // Division by zero is mathematically impossible here due to the boolean check
+        float t_leg = (pixel.y - p0.y) / (p1.y - p0.y);
+        x_leg = p0.x + t_leg * (p1.x - p0.x);
+    } else {
+        // Protect against a perfectly horizontal second leg
+        if (abs(p2.y - p1.y) < 1e-6) {
+            x_leg = p2.x;
+        } else {
+            float t_leg = (pixel.y - p1.y) / (p2.y - p1.y);
+            x_leg = p1.x + t_leg * (p2.x - p1.x);
+        }
     }
 
-    // 3. Barycentric Coordinates
+    // 3. Strict Triangle Bounds Check (Eliminates the Extraneous Root spike bug!)
+    float x_min_tri = min(x_chord, x_leg);
+    float x_max_tri = max(x_chord, x_leg);
+
+    if (pixel.x > x_max_tri) {
+        return sign_v; // Strictly right of the entire curve triangle
+    } else if (pixel.x < x_min_tri) {
+        return 0.0;    // Strictly left of the entire curve triangle
+    }
+
+    // 4. Inside the Triangle: Loop-Blinn Implicit Math
+    float denom = (p1.y - p2.y) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.y - p2.y);
+    if (abs(denom) < 1e-6) {
+        // Degenerate triangle (straight line). Since we are inside the horizontal bounds,
+        // we are practically on the line. Default to right-of-chord behavior.
+        return (pixel.x > x_chord) ? sign_v : 0.0;
+    }
+
     float inv_denom = 1.0 / denom;
     float w0 = ((p1.y - p2.y) * (pixel.x - p2.x) + (p2.x - p1.x) * (pixel.y - p2.y)) * inv_denom;
     float w1 = ((p2.y - p0.y) * (pixel.x - p2.x) + (p0.x - p2.x) * (pixel.y - p2.y)) * inv_denom;
     float w2 = 1.0 - w0 - w1;
 
-    // 4. Loop-Blinn Implicit Function (U^2 - V)
     float u = 0.5 * w1 + w2;
     float v = w2;
-    float f = u * u - v; // f < 0 means inside the parabola
+    float f = u * u - v;
 
-    // 5. Does the curve bulge right or left of the chord?
-    float x_chord_p1 = p0.x + ((p1.y - p0.y) / (p2.y - p0.y)) * (p2.x - p0.x);
-    bool bulges_right = p1.x > x_chord_p1;
-
-    // 6. The Boolean Union!
-    bool right_of_curve = false;
+    // 5. Evaluate Bulge Side & Boolean Union
+    bool bulges_right = x_leg > x_chord;
     if (bulges_right) {
-        // Curve is right of chord. To be right of curve, must be right of chord AND outside parabola.
-        right_of_curve = right_of_chord && (f > 0.0);
+        // Curve bulges right. Region f>0 is the bulge containing P1.
+        // To be right of the curve, you must be in the bulge.
+        return (f > 0.0) ? sign_v : 0.0;
     } else {
-        // Curve is left of chord. To be right of curve, must be right of chord OR inside parabola.
-        right_of_curve = right_of_chord || (f < 0.0);
+        // Curve bulges left. Region f>0 is the bulge containing P1.
+        // To be right of the curve, you must be OUTSIDE the bulge.
+        return (f < 0.0) ? sign_v : 0.0;
     }
-
-    return right_of_curve ? sign_v : 0.0;
 }
 
 // ============================================================================

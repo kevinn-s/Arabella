@@ -1,0 +1,24 @@
+# --- Rust specific ---
+/target/
+**/*.rs.bk
+*.pdb
+
+# --- WASM / wasm-pack specific ---
+# Standard output directory for wasm-pack build
+/pkg/
+# If using Trunk for development
+/dist/
+
+# --- JavaScript / Web dependencies ---
+# If you use npm/yarn for your frontend
+node_modules/
+package-lock.json
+yarn.lock
+npm-debug.log*
+
+# --- IDEs / Environment ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.env

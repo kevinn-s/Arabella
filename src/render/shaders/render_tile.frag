@@ -79,6 +79,24 @@ int get_backdrop(uvec2 backdrop, int pixel_row) {
     return unpack_i16(word, half_idx);
 }
 
+
+int get_row_backdrop(int local_y) {
+    uint b = (local_y < 2) ? v_backdrop.x : v_backdrop.y;
+    uint shift = ((local_y & 1) == 0) ? 0u : 16u;
+    int winding = int((b >> shift) & 0xFFFFu);
+    if ((winding & 0x8000) != 0) {
+        winding |= ~0xFFFF;
+    }
+    return winding;
+}
+
+vec4 fetch_segment_data(uint index) {
+    uint tex_width = 1u << u_segments_tex_width_bits;
+    uint tex_x = index & (tex_width - 1u);
+    uint tex_y = index >> u_segments_tex_width_bits;
+    return texelFetch(segments_texture, ivec2(tex_x, tex_y), 0);
+}
+
 void read_segment(uint seg_offset, out vec2 p0, out vec2 p1, out vec2 p2) {
     uint base_texel = seg_offset * 2u;
     uint tex_width = uint(textureSize(segments_texture, 0).x);
@@ -178,11 +196,11 @@ float quad_implicit_contribution(vec2 p0, vec2 p1, vec2 p2, vec2 pixel) {
     if (bulges_right) {
         // Curve bulges right. Region f>0 is the bulge containing P1.
         // To be right of the curve, you must be in the bulge.
-        return (f > 0.0) ? sign_v : 0.0;
+        return (f > 0.0) ? sign_v * -1.0 : 0.0;
     } else {
         // Curve bulges left. Region f>0 is the bulge containing P1.
         // To be right of the curve, you must be OUTSIDE the bulge.
-        return (f < 0.0) ? sign_v : 0.0;
+        return (f < 0.0) ? sign_v * -1.0 : 0.0;
     }
 }
 
@@ -212,7 +230,6 @@ vec4 resolve_paint() {
 // ============================================================================
 // Main
 // ============================================================================
-
 void main() {
     uint fill_rule = (v_paint_flag & FILL_RULE_MASK) >> FILL_RULE_SHIFT;
     uint seg_count  = v_segment.x;
@@ -222,12 +239,14 @@ void main() {
     if (u_negate_ndc == 0u) {
         pixel_xy.y = float(u_height) - pixel_xy.y;
     }
+    int local_y = int(v_local_xy.y - float(v_tile_origin_pixels.y));
+    local_y = clamp(local_y, 0, 3);
+    int row_backdrop = get_row_backdrop(local_y);
 
     int pixel_row = int(pixel_xy.y) - int(v_tile_origin_pixels.y);
     pixel_row = clamp(pixel_row, 0, TILE_PIXEL_ROWS - 1);
 
-    // FIXED: Decode backdrop to a float properly
-    float backdrop = float(get_backdrop(v_backdrop, pixel_row)) / 256.0;
+    float backdrop = float(get_backdrop(v_backdrop, local_y));
 
     // ── Solid tile fast path ──
     if (seg_count == 0u) {
@@ -237,39 +256,54 @@ void main() {
         } else {
             solid_coverage = clamp(abs(backdrop), 0.0, 1.0);
         }
-        
+
         if (solid_coverage > 0.0) {
             vec4 paint = resolve_paint();
-            fragColor = vec4(paint.rgb, paint.a * solid_coverage);
+            fragColor = vec4(0.0,0.0,0.0,float((int(v_backdrop.x))));
             return;
         } else {
             discard;
         }
     }
 
-    // ── Partial tile: Single Sample (No AA) ──
-    // Center the sample exactly in the middle of the pixel
-    vec2 sample_pos = vec2(floor(pixel_xy.x) + 0.5, floor(pixel_xy.y) + 0.5);
-    float winding = backdrop;
-
-    for (uint s = 0u; s < seg_count; s++) {
-        vec2 p0, p1, p2;
-        read_segment(seg_offset + s, p0, p1, p2);
-        winding += quad_implicit_contribution(p0, p1, p2, sample_pos);
-    }
-
-    // ── Fill Rule Test ──
     float coverage = 0.0;
-    if (fill_rule == FILL_RULE_EVENODD) {
-        coverage = 1.0 - abs(mod(winding, 2.0) - 1.0);
-    } else { // NONZERO
-        coverage = clamp(abs(winding), 0.0, 1.0);
-    }
 
-    if (coverage <= 0.0) {
+    for (int sx = 0; sx < 4; sx++) {
+        for (int sy = 0; sy < 4; sy++) {
+            bool sample_filled;
+                vec2 offset = vec2((float(sx) - 1.5) * 0.25, (float(sy) - 1.5) * 0.25);
+                vec2 sample_pos = v_local_xy + offset;
+                float sample_winding = float(row_backdrop);
+                   for (uint s = 0u; s < seg_count; s++) {
+                     uint tex_base = (seg_offset + s) * 2u;
+                vec4 tex0 = fetch_segment_data(tex_base);
+                vec4 tex1 = fetch_segment_data(tex_base + 1u);
+                
+                vec2 p0 = tex0.xy;
+                vec2 p1 = tex0.zw;
+                vec2 p2 = tex1.xy;
+                sample_winding += quad_implicit_contribution(p0,p1,p2,sample_pos);
+                sample_filled = (fill_rule == 0u) ? (abs(sample_winding) > 0.01) : ((int(abs(sample_winding)) % 2) != 0);
+                  if (sample_filled) {
+                    if (p2.y > p0.y) {
+    coverage = float((int(v_backdrop.x) << 16) >> 16);
+}
+               if (p0.y > p2.y) {
+    coverage += 1.0;
+}
+                  }
+                   }
+
+  
+              
+        }
+    }
+   
+    coverage /= 16.0;
+    if (coverage < 0.001) {
         discard;
     }
 
     vec4 paint = resolve_paint();
-    fragColor = vec4(paint.rgb, paint.a * coverage);
+    fragColor = vec4(0.0,0.0,0.0,1.0);
 }

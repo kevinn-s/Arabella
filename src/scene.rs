@@ -508,35 +508,25 @@ pub fn bin_path(
         let seg_idx = i as u32;
 
         for tile_row in row_start..=row_end {
-            if let Some((col_start, col_end, cov_deltas, _, _)) = line_x_range(
+            if let Some((col_start, col_end, _cov_deltas, _, _)) = line_x_range(
                 p0x, p0y, p1x, p1y,
                 line_left_x, line_right_x,
                 tile_row, y_min, y_max,
                 tile_cols, viewport_w,
             ) {
+                // FIXED: Use cursors to write the segment index, then advance the cursor!
                 for col in col_start..=col_end {
-        scratch.tiles[tile_row * tile_cols + col].count += 1;
-    }
-    let exit_col = col_end + 1;
-    if exit_col < tile_cols {
-        let idx = tile_row * tile_cols + exit_col;
-        
-        // Direction factor: positive going down, negative going up
-        let sign = if p1y > p0y { 1.0 } else { -1.0 };
-        
-        for px in 0..Tile::PIXEL_ROWS {
-            if cov_deltas[px] > 0.0 {
-                // Scale exact fraction by 256 for 8.8 fixed-point storage
-                let delta = (cov_deltas[px] * sign * 256.0).round() as i16;
-                scratch.tiles[idx].backdrop[px] += delta;
-            }
-        }
-    }
+                    let idx = tile_row * tile_cols + col;
+                    let cursor = scratch.cursors[idx] as usize;
+                    scratch.segment_refs[cursor] = seg_idx;
+                    scratch.cursors[idx] += 1;
+                }
+                // DELTED: All the backdrop logic that was wrongly copied here
             }
         }
     }
 
-    for i in 0..n_quads {
+for i in 0..n_quads {
         let qi = i * 6;
         let p0x = f32::from_bits(quads[qi]);
         let p0y = f32::from_bits(quads[qi + 1]);
@@ -555,37 +545,26 @@ pub fn bin_path(
         let row_start = ((y_min / TILE_H) as usize).min(tile_rows.saturating_sub(1));
         let row_end = ((y_max / TILE_H) as usize).min(tile_rows.saturating_sub(1));
 
-        // Quad indices are offset past lines
         let seg_idx = (n_lines + i) as u32;
 
         for tile_row in row_start..=row_end {
-            if let Some((col_start, col_end, cov_deltas, _, _)) = quad_x_range(
+            if let Some((col_start, col_end, _cov_deltas, _, _)) = quad_x_range(
                 p0x, p0y, p1x, p1y, p2x, p2y,
                 quad_left_x, quad_right_x,
                 tile_row, y_min, y_max,
                 tile_cols, viewport_w,
             ) {
+                // FIXED: Use cursors to write the segment index, then advance the cursor!
                 for col in col_start..=col_end {
-        scratch.tiles[tile_row * tile_cols + col].count += 1;
-    }
-    let exit_col = col_end + 1;
-    if exit_col < tile_cols {
-        let idx = tile_row * tile_cols + exit_col;
-        
-        // Quads are y-monotonic, so evaluate total direction from p0 to p2
-        let sign = if p2y > p0y { 1.0 } else { -1.0 };
-        
-        for px in 0..Tile::PIXEL_ROWS {
-            if cov_deltas[px] > 0.0 {
-                let delta = (cov_deltas[px] * sign * 256.0).round() as i16;
-                scratch.tiles[idx].backdrop[px] += delta;
+                    let idx = tile_row * tile_cols + col;
+                    let cursor = scratch.cursors[idx] as usize;
+                    scratch.segment_refs[cursor] = seg_idx;
+                    scratch.cursors[idx] += 1;
+                }
+                // DELETED: All the backdrop logic that was wrongly copied here
             }
         }
-    }
-            }
-        }
-    }
-
+    }   
     // ── Pass 5: pack GPU segments (uniform 6-float quads) ──
 
     let gpu_seg_base = (gpu_segments.len() / 6) as u32;

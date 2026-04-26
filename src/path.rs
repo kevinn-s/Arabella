@@ -6,7 +6,7 @@ use kurbo::{
 use alloc::vec;
 use alloc::vec::Vec;
 const MAX_QUADS: usize = 16;
-const TO_QUAD_TOL: f32 = 16.0;
+const TO_QUAD_TOL: f32 = 0.5;
 const EPSILON: f32 = 1e-12;
 pub(crate) const SQRT_TOL: f64 = 0.5;
 pub(crate) const TOL: f64 = SQRT_TOL * SQRT_TOL;
@@ -172,8 +172,8 @@ fn convert_cubics_to_quadratic_curves<S: Simd>(
         &even_pts.as_flattened()[(n.div_ceil(4) * 8 + 2)..][..8],
     );
     let p2_slice = p2v.as_slice();
-    out[index]     = p2_slice[0];
-    out[index + 1] = p2_slice[1];
+    out[index]     = c.p3.x as f32;
+out[index + 1] = c.p3.y as f32;
 
     out
 }

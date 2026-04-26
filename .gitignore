@@ -9,7 +9,7 @@
 # If using Trunk for development
 /dist/
 
-# --- JavaScript / Web dependencies ---
+# --- JavaScript / Web dependencies ---a
 # If you use npm/yarn for your frontend
 node_modules/
 package-lock.json

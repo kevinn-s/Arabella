@@ -176,20 +176,18 @@ impl WebGlPrograms {
         }
     }
     fn resize_segments_texture(&mut self, max_texture_dimension_2d: u32, segments_len: usize) {
-        // 2 texels per quadratic curve
-        // Each curve has 3 control points, but shares endpoints
-        let required_segments_texture_height: u32 = (segments_len as u32 / 3) * 2;
-        required_segments_texture_height.div_ceil(max_texture_dimension_2d);
-
-        if required_segments_texture_height > self.resources.segments_texture_height {
-            assert!(
-                required_segments_texture_height <= max_texture_dimension_2d,
-                "Segments texture height exceeds max texture dimensions"
-            );
-            // Update texture height
-            self.resources.segments_texture_height = required_segments_texture_height;
-        }
+    let n_segments = (segments_len / 6) as u32;
+    let total_texels = n_segments * 2;
+    let required_height = total_texels.div_ceil(max_texture_dimension_2d).max(1);
+    
+    if required_height > self.resources.segments_texture_height {
+        assert!(
+            required_height <= max_texture_dimension_2d,
+            "Segments texture height exceeds max texture dimensions"
+        );
+        self.resources.segments_texture_height = required_height;
     }
+}
     fn resize_encoded_paints_texture(&mut self, max_texture_dimension_2d: u32, paint_idxs: &[u32]) {
         let required_texels = paint_idxs.last().unwrap();
         let required_encoded_paints_height = required_texels.div_ceil(max_texture_dimension_2d);
@@ -472,7 +470,7 @@ impl WebGlRenderer {
         // We do our own anti-aliasing, so no need to enable it in the WebGL
         // context.
         let context_options = js_sys::Object::new();
-        js_sys::Reflect::set(&context_options, &"antialias".into(), &JsValue::FALSE).unwrap();
+        js_sys::Reflect::set(&context_options, &"antialias".into(), &JsValue::TRUE).unwrap();
         // Vello only supports 24+ bit depth buffers. If the hardware falls back to a 16 bit depth buffer,
         // correctness issues will arise. For all intents and purposes, a device manufactured in the past 10 years
         // should support 24+ bit depth buffers (certainly those within the realm of what we consider "supported" devices)
@@ -485,7 +483,7 @@ impl WebGlRenderer {
         //
         // TODO: The above understanding is encoded in a below assertion, but this should be encapsulated within a
         // "this device can run Vello correctly" check function.
-        js_sys::Reflect::set(&context_options, &"depth".into(), &JsValue::TRUE).unwrap();
+        // js_sys::Reflect::set(&context_options, &"depth".into(), &JsValue::TRUE).unwrap();
 
         let gl = canvas
             .get_context_with_context_options("webgl2", &context_options)
@@ -503,22 +501,7 @@ impl WebGlRenderer {
         // From my (Laurenz) testing, tests seem to work even when anti-aliasing is enabled,
         // but Andrew previously got errors similar to the ones outlined in
         // https://github.com/gfx-rs/wgpu/issues/5263. Therefore, we just leave it as is for now.
-        #[cfg(debug_assertions)]
-        {
-            // If a WebGL context already exists on this canvas, it will be returned instead of
-            // creating a new one with the correct context_options set.
-            // See this comment for why we still care about non-antialiased context:
-            // https://github.com/linebender/vello/pull/1546/changes#r3008692535
-            let context_attributes = gl.get_context_attributes().unwrap();
-            let antialias = js_sys::Reflect::get(&context_attributes, &"antialias".into())
-                .unwrap()
-                .as_bool()
-                .unwrap();
-            debug_assert!(
-                !antialias,
-                "WebGL context must be created with `antialias: false` for vello_hybrid to work correctly."
-            );
-        }
+       
 
         let mut settings = settings;
         let max_texture_dimension_2d = get_max_texture_dimension_2d(&gl);
@@ -781,7 +764,12 @@ impl WebGlRendererContext<'_> {
 
         if tiles_len as i32 > 0 {
             self.gl.depth_mask(true);
-            // self.gl.disable(WebGl2RenderingContext::BLEND);
+            self.gl.enable(WebGl2RenderingContext::BLEND);
+    self.gl.blend_func(
+        WebGl2RenderingContext::SRC_ALPHA,
+        WebGl2RenderingContext::ONE_MINUS_SRC_ALPHA,
+    );
+            
             self.gl.draw_arrays_instanced(
                 WebGl2RenderingContext::TRIANGLE_STRIP,
                 0,

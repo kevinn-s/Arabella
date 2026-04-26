@@ -5,7 +5,7 @@
 **Hybrid CPU/GPU renderer**
 
 [![MIT license.](https://img.shields.io/badge/license-Apache--2.0_OR_MIT-blue.svg)](#license)
-\
+
 
 </div>
 

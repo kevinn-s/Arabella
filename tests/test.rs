@@ -61,17 +61,20 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 #[wasm_bindgen_test]
 async fn test_renders_pink_circle() {
+
     console_error_panic_hook::set_once();
     let _ = console_log::init_with_level(log::Level::Debug);
 
     const W: u16 = 1080;
     const H: u16 = 720;
 
-    // ── Step 1: build the scene ──
+    let dpr = web_sys::window().unwrap().device_pixel_ratio();
+    log::debug!("Device pixel ratio: {}", dpr);
+        // ── Step 1: build the scene ──
     let mut scene = Scene::new(W, H);
 
     // Pink circle, well inside the viewport so we can see it
-    let circle = Circle::new((100.0, 100.0), 100.0);
+    let circle = Circle::new((400.0, 400.0), 300.0);
     let triangle = Triangle::new((20.0, 20.0), (50.0, 50.0), (100.0,100.0));
     let pink = Color::from_rgb8(242, 140, 168);
 
@@ -83,20 +86,29 @@ async fn test_renders_pink_circle() {
         &circle,
     );
 
-    
+    //TODO. We got backdrop problem...
 
+// Assuming backdrop[0] is a u32 containing two 16-bit values
+let packed = scene.tiles()[100].backdrop[0];
 
-    log::debug!("Scene has {} tiles after binning", scene.tiles().len());
-    log::debug!("Scene has {} segment floats", scene.segments().len());
+// Extract lower 16 bits as signed i16
+let first = ((packed as i32) << 16) >> 16; 
+
+// Extract upper 16 bits as signed i16
+let second = (packed as i32) >> 16;
+
+log::debug!("Lower: {}, Upper: {}", first, second);
+    log::debug!("Scene has {} tiles after binning", scene.tiles()[100].x);
+    log::debug!("Scene has {} segment floats", scene.tiles()[100].segment[0]);
 
     // ── Step 2: create renderer ──
-    let canvas = create_canvas(W as u32, H as u32);
+    let canvas = create_canvas(W as u32, H as u32, dpr);
     let mut renderer = WebGlRenderer::new(&canvas);
 
     // ── Step 3: render ──
     let render_size = crate::RenderSize {
-        width: W as u32,
-        height: H as u32,
+        width: (W as f64 * dpr) as u32,   // <--- Multiply by DPR
+    height: (H as f64 * dpr) as u32,
     };
     renderer.render(&mut scene, &render_size);
 
@@ -154,19 +166,32 @@ async fn test_renders_pink_circle() {
 // Helpers
 // ============================================================================
 
-fn create_canvas(width: u32, height: u32) -> HtmlCanvasElement {
+fn create_canvas(width: u32, height: u32, dpr: f64) -> HtmlCanvasElement {
     let document = web_sys::window().unwrap().document().unwrap();
     let canvas: HtmlCanvasElement = document
         .create_element("canvas")
         .unwrap()
         .dyn_into()
         .unwrap();
-    canvas.set_width(width);
-    canvas.set_height(height);
+    
+    // 1. Set the INTERNAL WebGL buffer to the high-res scaled size
+    canvas.set_width((width as f64 * dpr) as u32);
+    canvas.set_height((height as f64 * dpr) as u32);
+    
+    // 2. Set the CSS display size to the original logical size
+    canvas
+        .style()
+        .set_property("width", &format!("{}px", width))
+        .unwrap();
+    canvas
+        .style()
+        .set_property("height", &format!("{}px", height))
+        .unwrap();
     canvas
         .style()
         .set_property("border", "1px solid black")
         .unwrap();
+        
     document.body().unwrap().append_child(&canvas).unwrap();
     canvas
 }

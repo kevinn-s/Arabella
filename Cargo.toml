@@ -1,0 +1,75 @@
+[package]
+name = "arabella"
+version = "0.1.0"
+description = "A Parallel, hybrid CPU/GPU renderer, balancing computation between CPU and GPU for efficiency."
+categories = ["rendering", "graphics"]
+keywords = ["2d", "vector-graphics"]
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/kevinn-s/arabella"
+
+[package.metadata.docs.rs]
+all-features = true
+default-target = "x86_64-unknown-linux-gnu"
+targets = ["wasm32-unknown-unknown"]
+
+[dependencies]
+libm = { version = "0.2", optional = true }
+peniko = { version = "0.6.0" ,features = ["bytemuck"]}
+kurbo = { version = "0.13.0" }
+png = { version = "0.18.1", optional = true } 
+bytemuck = { version = "1.25.0", features = ["derive", "extern_crate_alloc"]}
+hashbrown = { version = "0.17.0" }
+fearless_simd = { version = "0.4.0"  }
+smallvec =  "1.15.1"
+thiserror = { version = "2.0.18" }
+log = { version = "0.4.29" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3.91", optional = true }
+web-sys = { version = "0.3.91", features = [
+    "HtmlCanvasElement",
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CssStyleDeclaration",
+    "WebGl2RenderingContext",
+    "MouseEvent",
+    "WheelEvent",
+    "KeyboardEvent",
+    "WebGl2RenderingContext",
+    "WebGlContextAttributes",
+    "WebGlProgram",
+    "WebGlUniformLocation",
+    "WebGlBuffer",
+    "WebGlShader",
+    "WebGlTexture",
+    "WebGlFramebuffer",
+    "WebGlRenderbuffer",
+    "WebGlVertexArrayObject",
+], optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { version = "1.11.0", optional = true }
+thread_local = { version = "1.1.9", optional = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.50"
+console_error_panic_hook = "0.1"
+console_log = "1.0"
+
+[features]
+webgl = ["dep:js-sys", "dep:web-sys", "dep:wasm-bindgen"]
+default = ["std", "png"]
+# Get floating point functions from the standard library (likely using your target's libc).
+std = ["peniko/std", "fearless_simd/std"]
+# Use floating point implementations from libm.
+libm = ["peniko/libm", "dep:libm", "fearless_simd/libm"]
+# Allow loading Pixmap from PNG, and drawing png glyphs.
+png = ["std", "dep:png"]
+# Enable multi-threaded rendering.
+multithreading = ["std", "dep:rayon", "dep:thread_local"]
+# Development only features

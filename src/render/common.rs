@@ -57,6 +57,7 @@ pub struct Tile {
     pub payload: u32,
     pub paint_and_rect_flag: u32,
     pub depth_index: u32,
+    pub _final_pad: u32,
 }
 
 impl Tile {

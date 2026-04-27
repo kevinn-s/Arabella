@@ -13,7 +13,7 @@
 // ============================================================================
 #![cfg(all(target_arch = "wasm32", feature = "webgl"))]
 
-use kurbo::Triangle;
+use kurbo::{BezPath, Triangle, Rect, PathEl};
 use wasm_bindgen::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::*;
@@ -31,8 +31,11 @@ use arabella::{
     Scene,
     Tile,
     WebGlRenderer,
-    RenderSize
+    RenderSize,
+    PicoSvg,
+    Item
 };
+
 
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -58,7 +61,15 @@ wasm_bindgen_test_configure!(run_in_browser);
 // ============================================================================
 // Test 2: Render one solid pink circle
 // ============================================================================
+struct FillItem {
+    color: Color,
+    path: BezPath, // The path to draw
+}
 
+// A simple SVG root, with all items to render.
+struct Svg {
+    items: Vec<FillItem>,
+}
 #[wasm_bindgen_test]
 async fn test_renders_pink_circle() {
 
@@ -69,7 +80,7 @@ async fn test_renders_pink_circle() {
     const H: u16 = 720;
 
     let dpr = web_sys::window().unwrap().device_pixel_ratio();
-    log::debug!("Device pixel ratio: {}", dpr);
+
         // ── Step 1: build the scene ──
     let mut scene = Scene::new(W, H);
 
@@ -86,85 +97,85 @@ async fn test_renders_pink_circle() {
         &circle,
     );
 
-    //TODO. We got backdrop problem...
 
-// Assuming backdrop[0] is a u32 containing two 16-bit values
-let packed = scene.tiles()[100].backdrop[0];
 
-// Extract lower 16 bits as signed i16
-let first = ((packed as i32) << 16) >> 16; 
 
-// Extract upper 16 bits as signed i16
-let second = (packed as i32) >> 16;
+  
 
-log::debug!("Lower: {}, Upper: {}", first, second);
-    log::debug!("Scene has {} tiles after binning", scene.tiles()[100].x);
-    log::debug!("Scene has {} segment floats", scene.tiles()[100].segment[0]);
+}
 
+fn collect_fills(item: &Item, transform: Affine, out: &mut Vec<(Affine, Color, BezPath)>) {
+    match item {
+        Item::Fill(fill) => {
+            out.push((transform, fill.color, fill.path.clone()));
+        }
+        Item::Stroke(_) => {
+            // Skip strokes for now (your renderer doesn't support them yet)
+        }
+        Item::Group(group) => {
+            let combined = transform * group.affine;
+            for child in &group.children {
+                collect_fills(child, combined, out);
+            }
+        }
+    }
+}
+
+#[wasm_bindgen_test]
+async fn test_renders_tiger_svg() {
+    console_error_panic_hook::set_once();
+    let _ = console_log::init_with_level(log::Level::Debug);
+    const W: u16 = 1440;
+    const H: u16 = 720;
+    let dpr = web_sys::window().unwrap().device_pixel_ratio();
+    log::debug!("Device pixel ratio: {}", dpr);
+
+    // ── Step 1: build the scene ──
+    let mut scene = Scene::new(W, H);
+
+    let svg_str = include_str!("../assets/Ghostscript_Tiger.svg");
+    let pico_svg = PicoSvg::load(svg_str, 1.0).expect("Failed to parse SVG");
+let mut all_fills: Vec<(Affine, Color, BezPath)> = Vec::new();
+for item in &pico_svg.items {
+    collect_fills(item, Affine::IDENTITY, &mut all_fills);
+}
+
+
+
+        let pink = Color::from_rgb8(242, 140, 168);
+    log::debug!("{:?}", all_fills.len());
+
+    // Apply a fixed transform (e.g., scaling—as in SvgScene::tiger).
+    let transform = Affine::scale(2.0);
+log::info!("TILE DATA CHECK:");
+log::info!(" - Size of u16: {}", core::mem::size_of::<u16>());
+log::info!(" - Size of u32: {}", core::mem::size_of::<u32>());
+log::info!(" - Calculated manual size: {}", (2*2) + (1*1+2) + (2*4) + (2*4) + 4 + 4 + 4);
+log::info!(" - Actual Struct Stride: {}", core::mem::size_of::<Tile>());
+
+for (svg_transform, color, path) in all_fills {
+    scene.fill(
+        Fill::NonZero,
+        transform ,
+        color,
+        None,
+        &path
+    );
+    log::info!("depth_index is {:}", scene.depth());
+}
+ 
     // ── Step 2: create renderer ──
     let canvas = create_canvas(W as u32, H as u32, dpr);
     let mut renderer = WebGlRenderer::new(&canvas);
 
     // ── Step 3: render ──
-    let render_size = crate::RenderSize {
-        width: (W as f64 * dpr) as u32,   // <--- Multiply by DPR
-    height: (H as f64 * dpr) as u32,
+    let render_size = arabella::RenderSize {
+        width: (W as f64 * dpr) as u32,
+        height: (H as f64 * dpr) as u32,
     };
     renderer.render(&mut scene, &render_size);
 
-    log::debug!("BBRender complete — you should see a pink circle on the canvas");
 }
-
-// ============================================================================
-// Test 3: Render multiple overlapping shapes (depth ordering)
-// ============================================================================
-
-// #[wasm_bindgen_test]
-// async fn test_renders_overlapping_circles() {
-//     console_error_panic_hook::set_once();
-//     let _ = console_log::init_with_level(log::Level::Debug);
-
-//     const W: u16 = 300;
-//     const H: u16 = 300;
-//     let mut scene = Scene::new(W, H);
-
-//     // Three overlapping circles, painter's order: red behind, green middle, blue front
-//     scene.fill(
-//         Fill::NonZero,
-//         Affine::IDENTITY,
-//         Color::from_rgb8(220, 80, 80),
-//         None,
-//         &Circle::new((120.0, 150.0), 70.0),
-//     );
-//     scene.fill(
-//         Fill::NonZero,
-//         Affine::IDENTITY,
-//         Color::from_rgb8(80, 200, 120),
-//         None,
-//         &Circle::new((180.0, 150.0), 70.0),
-//     );
-//     scene.fill(
-//         Fill::NonZero,
-//         Affine::IDENTITY,
-//         Color::from_rgb8(80, 140, 220),
-//         None,
-//         &Circle::new((150.0, 200.0), 70.0),
-//     );
-
-//     let canvas = create_canvas(W as u32, H as u32);
-//     let mut renderer = WebGlRenderer::new(&canvas);
-//     let render_size = crate::RenderSize { width: W as u32, height: H as u32 };
-//     renderer.render(&mut scene, &render_size);
-
-//     log::debug!(
-//         "Rendered {} tiles for 3 overlapping circles",
-//         scene.tiles().len()
-//     );
-// }
-
-// ============================================================================
-// Helpers
-// ============================================================================
 
 fn create_canvas(width: u32, height: u32, dpr: f64) -> HtmlCanvasElement {
     let document = web_sys::window().unwrap().document().unwrap();

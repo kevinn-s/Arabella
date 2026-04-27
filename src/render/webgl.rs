@@ -161,7 +161,7 @@ impl WebGlPrograms {
 
             GpuEncodedPaint::serialize_to_buffer(encoded_paints, &mut self.encoded_paints_data);
 
-            gl.active_texture(WebGl2RenderingContext::TEXTURE0);
+            gl.active_texture(WebGl2RenderingContext::TEXTURE3);
             gl.bind_texture(
                 WebGl2RenderingContext::TEXTURE_2D,
                 Some(&self.resources.encoded_paints_texture),
@@ -298,7 +298,7 @@ fn create_webgl_resources(gl: &WebGl2RenderingContext) -> WebGlResources {
     }
     let encoded_paints_texture = gl.create_texture().unwrap();
     {
-        gl.active_texture(WebGl2RenderingContext::TEXTURE0);
+        gl.active_texture(WebGl2RenderingContext::TEXTURE1);
         gl.bind_texture(
             WebGl2RenderingContext::TEXTURE_2D,
             Some(&encoded_paints_texture),
@@ -326,7 +326,7 @@ fn create_webgl_resources(gl: &WebGl2RenderingContext) -> WebGlResources {
     }
     let gradient_texture = gl.create_texture().unwrap();
     {
-        gl.active_texture(WebGl2RenderingContext::TEXTURE0);
+        gl.active_texture(WebGl2RenderingContext::TEXTURE2);
         gl.bind_texture(WebGl2RenderingContext::TEXTURE_2D, Some(&gradient_texture));
         gl.tex_parameteri(
             WebGl2RenderingContext::TEXTURE_2D,
@@ -354,6 +354,7 @@ fn create_webgl_resources(gl: &WebGl2RenderingContext) -> WebGlResources {
         .unwrap()
         .as_f64()
         .unwrap() as u32;
+
 
     let config_buffer = gl.create_buffer().unwrap();
     WebGlResources {
@@ -470,7 +471,7 @@ impl WebGlRenderer {
         // We do our own anti-aliasing, so no need to enable it in the WebGL
         // context.
         let context_options = js_sys::Object::new();
-        js_sys::Reflect::set(&context_options, &"antialias".into(), &JsValue::TRUE).unwrap();
+        js_sys::Reflect::set(&context_options, &"antialias".into(), &JsValue::FALSE).unwrap();
         // Vello only supports 24+ bit depth buffers. If the hardware falls back to a 16 bit depth buffer,
         // correctness issues will arise. For all intents and purposes, a device manufactured in the past 10 years
         // should support 24+ bit depth buffers (certainly those within the realm of what we consider "supported" devices)
@@ -483,7 +484,7 @@ impl WebGlRenderer {
         //
         // TODO: The above understanding is encoded in a below assertion, but this should be encapsulated within a
         // "this device can run Vello correctly" check function.
-        // js_sys::Reflect::set(&context_options, &"depth".into(), &JsValue::TRUE).unwrap();
+        js_sys::Reflect::set(&context_options, &"depth".into(), &JsValue::TRUE).unwrap();
 
         let gl = canvas
             .get_context_with_context_options("webgl2", &context_options)
@@ -684,6 +685,7 @@ impl WebGlRendererContext<'_> {
         if tiles.is_empty() {
             return;
         };
+        log::info!("depth is{:}", tiles[0].depth_index);
         let config = Config {
             width: render_size.width,
             height: render_size.height,
@@ -763,6 +765,15 @@ impl WebGlRendererContext<'_> {
         self.gl.bind_vertex_array(Some(&self.programs.resources.tile_vao));
 
         if tiles_len as i32 > 0 {
+
+            self.gl.enable(WebGl2RenderingContext::DEPTH_TEST);
+            self.gl.depth_func(WebGl2RenderingContext::LEQUAL); // Closer or equal depth wins
+            
+            // 2. Clear the depth buffer for this set of tiles
+            // If you call render_tiles multiple times per frame, 
+            // you might want to clear this at the very start of the frame instead.
+            self.gl.clear_depth(1.0);
+            self.gl.clear(WebGl2RenderingContext::DEPTH_BUFFER_BIT);
             self.gl.depth_mask(true);
             self.gl.enable(WebGl2RenderingContext::BLEND);
     self.gl.blend_func(

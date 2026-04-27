@@ -6,10 +6,12 @@ mod scene;
 mod render;
 mod paint;
 mod path;
+mod pico_svg;  
 pub use render::{Config, Tile, RenderSize};
 #[cfg(all(target_arch = "wasm32", feature = "webgl"))]
 pub use render::webgl::WebGlRenderer;
 pub use scene::{Scene};
+pub use pico_svg::{PicoSvg, FillItem, Item, GroupItem, StrokeItem};
 
 
 use thiserror::Error;

@@ -161,7 +161,7 @@ fn eval_quad_x_at_y(
     let c = p0y - y;
 
     let t = if a.abs() < 1e-6 {
-        if b.abs() < 1e-6 { 0.0 } else { -c / b }
+        if b.abs() < 1e-4 { 0.0 } else { -c / b }
     } else {
         let disc = (b * b - 4.0 * a * c).max(0.0);
         let sqrt_disc = disc.sqrt();
@@ -268,7 +268,7 @@ fn quad_x_range(
 
     // X-extremum check
     let denom = p0x - 2.0 * p1x + p2x;
-    if denom.abs() > 1e-6 {
+    if denom.abs() > 1e-4 {
         let t_ext = (p0x - p1x) / denom;
         if t_ext > 0.0 && t_ext < 1.0 {
             let y_ext = eval_quad_y_at_t(p0y, p1y, p2y, t_ext);
@@ -400,9 +400,11 @@ pub fn bin_path(
         
         for px in 0..Tile::PIXEL_ROWS {
             if cov_deltas[px] > 0.0 {
-                // Scale exact fraction by 256 for 8.8 fixed-point storage
-                let delta = (cov_deltas[px] * sign * 256.0).round() as i16;
-                scratch.tiles[idx].backdrop[px] += delta;
+                if cov_deltas[px] > 0.0 {
+        // Use the fractional delta (8.8 fixed point)
+        let delta = (cov_deltas[px] * sign * 256.0).round() as i16;
+        scratch.tiles[idx].backdrop[px] += delta; // Add the fraction, not the whole 1
+    }
             }
         }
     }
@@ -451,9 +453,10 @@ pub fn bin_path(
         
         for px in 0..Tile::PIXEL_ROWS {
             if cov_deltas[px] > 0.0 {
-                let delta = (cov_deltas[px] * sign * 256.0).round() as i16;
-                scratch.tiles[idx].backdrop[px] += delta;
-            }
+        // Use the fractional delta (8.8 fixed point)
+        let delta = (cov_deltas[px] * sign * 256.0).round() as i16;
+        scratch.tiles[idx].backdrop[px] += delta; // Add the fraction, not the whole 1
+    }
         }
     }
             }
@@ -484,87 +487,89 @@ pub fn bin_path(
 
     // ── Pass 4: fill segment_refs (re-sweep) ──
 
-    scratch.segment_refs.clear();
-    scratch.segment_refs.resize(total_refs, 0);
-    scratch.cursors.copy_from_slice(&scratch.offsets);
+  // ── Pass 4: fill segment_refs (re-sweep) ──
 
-    for i in 0..n_lines {
-        let li = i * 4;
-        let p0x = f32::from_bits(lines[li]);
-        let p0y = f32::from_bits(lines[li + 1]);
-        let p1x = f32::from_bits(lines[li + 2]);
-        let p1y = f32::from_bits(lines[li + 3]);
+scratch.segment_refs.clear();
+scratch.segment_refs.resize(total_refs, 0);
+scratch.cursors.copy_from_slice(&scratch.offsets);
 
-        if (p1y - p0y).abs() < 1e-6 { continue; }
-        let y_min = p0y.min(p1y).max(0.0);
-        let y_max = p0y.max(p1y).min(viewport_h);
-        if y_min >= y_max { continue; }
+// Lines
+for i in 0..n_lines {
+    let li = i * 4;
+    let p0x = f32::from_bits(lines[li]);
+    let p0y = f32::from_bits(lines[li + 1]);
+    let p1x = f32::from_bits(lines[li + 2]);
+    let p1y = f32::from_bits(lines[li + 3]);
 
-        let line_left_x = p0x.min(p1x);
-        let line_right_x = p0x.max(p1x);
-        let row_start = ((y_min / TILE_H) as usize).min(tile_rows.saturating_sub(1));
-        let row_end = ((y_max / TILE_H) as usize).min(tile_rows.saturating_sub(1));
+    if (p1y - p0y).abs() < 1e-6 { continue; }
+    let y_min = p0y.min(p1y).max(0.0);
+    let y_max = p0y.max(p1y).min(viewport_h);
+    if y_min >= y_max { continue; }
 
-        let seg_idx = i as u32;
+    let line_left_x = p0x.min(p1x);
+    let line_right_x = p0x.max(p1x);
+    let row_start = ((y_min / TILE_H) as usize).min(tile_rows.saturating_sub(1));
+    let row_end = ((y_max / TILE_H) as usize).min(tile_rows.saturating_sub(1));
 
-        for tile_row in row_start..=row_end {
-            if let Some((col_start, col_end, _cov_deltas, _, _)) = line_x_range(
-                p0x, p0y, p1x, p1y,
-                line_left_x, line_right_x,
-                tile_row, y_min, y_max,
-                tile_cols, viewport_w,
-            ) {
-                // FIXED: Use cursors to write the segment index, then advance the cursor!
-                for col in col_start..=col_end {
-                    let idx = tile_row * tile_cols + col;
-                    let cursor = scratch.cursors[idx] as usize;
-                    scratch.segment_refs[cursor] = seg_idx;
-                    scratch.cursors[idx] += 1;
-                }
-                // DELTED: All the backdrop logic that was wrongly copied here
+    let seg_idx = i as u32;
+
+    for tile_row in row_start..=row_end {
+        if let Some((col_start, col_end, _, _, _)) = line_x_range(
+            p0x, p0y, p1x, p1y,
+            line_left_x, line_right_x,
+            tile_row, y_min, y_max,
+            tile_cols, viewport_w,
+        ) {
+            // WRITE segment_refs using cursors — NO count increment, NO backdrop
+            for col in col_start..=col_end {
+                let tile_idx = tile_row * tile_cols + col;
+                let cursor = scratch.cursors[tile_idx] as usize;
+                scratch.segment_refs[cursor] = seg_idx;
+                scratch.cursors[tile_idx] += 1;
             }
         }
     }
+}
 
+// Quads
 for i in 0..n_quads {
-        let qi = i * 6;
-        let p0x = f32::from_bits(quads[qi]);
-        let p0y = f32::from_bits(quads[qi + 1]);
-        let p1x = f32::from_bits(quads[qi + 2]);
-        let p1y = f32::from_bits(quads[qi + 3]);
-        let p2x = f32::from_bits(quads[qi + 4]);
-        let p2y = f32::from_bits(quads[qi + 5]);
+    let qi = i * 6;
+    let p0x = f32::from_bits(quads[qi]);
+    let p0y = f32::from_bits(quads[qi + 1]);
+    let p1x = f32::from_bits(quads[qi + 2]);
+    let p1y = f32::from_bits(quads[qi + 3]);
+    let p2x = f32::from_bits(quads[qi + 4]);
+    let p2y = f32::from_bits(quads[qi + 5]);
 
-        if (p2y - p0y).abs() < 1e-6 { continue; }
-        let y_min = p0y.min(p2y).max(0.0);
-        let y_max = p0y.max(p2y).min(viewport_h);
-        if y_min >= y_max { continue; }
+    if (p2y - p0y).abs() < 1e-6 { continue; }
+    let y_min = p0y.min(p2y).max(0.0);
+    let y_max = p0y.max(p2y).min(viewport_h);
+    if y_min >= y_max { continue; }
 
-        let quad_left_x = p0x.min(p1x).min(p2x);
-        let quad_right_x = p0x.max(p1x).max(p2x);
-        let row_start = ((y_min / TILE_H) as usize).min(tile_rows.saturating_sub(1));
-        let row_end = ((y_max / TILE_H) as usize).min(tile_rows.saturating_sub(1));
+    let quad_left_x = p0x.min(p1x).min(p2x);
+    let quad_right_x = p0x.max(p1x).max(p2x);
+    let row_start = ((y_min / TILE_H) as usize).min(tile_rows.saturating_sub(1));
+    let row_end = ((y_max / TILE_H) as usize).min(tile_rows.saturating_sub(1));
 
-        let seg_idx = (n_lines + i) as u32;
+    let seg_idx = (n_lines + i) as u32;
 
-        for tile_row in row_start..=row_end {
-            if let Some((col_start, col_end, _cov_deltas, _, _)) = quad_x_range(
-                p0x, p0y, p1x, p1y, p2x, p2y,
-                quad_left_x, quad_right_x,
-                tile_row, y_min, y_max,
-                tile_cols, viewport_w,
-            ) {
-                // FIXED: Use cursors to write the segment index, then advance the cursor!
-                for col in col_start..=col_end {
-                    let idx = tile_row * tile_cols + col;
-                    let cursor = scratch.cursors[idx] as usize;
-                    scratch.segment_refs[cursor] = seg_idx;
-                    scratch.cursors[idx] += 1;
-                }
-                // DELETED: All the backdrop logic that was wrongly copied here
+    for tile_row in row_start..=row_end {
+        if let Some((col_start, col_end, _, _, _)) = quad_x_range(
+            p0x, p0y, p1x, p1y, p2x, p2y,
+            quad_left_x, quad_right_x,
+            tile_row, y_min, y_max,
+            tile_cols, viewport_w,
+        ) {
+            // WRITE segment_refs using cursors — NO count increment, NO backdrop
+            for col in col_start..=col_end {
+                let tile_idx = tile_row * tile_cols + col;
+                let cursor = scratch.cursors[tile_idx] as usize;
+                scratch.segment_refs[cursor] = seg_idx;
+                scratch.cursors[tile_idx] += 1;
             }
         }
-    }   
+    }
+} 
     // ── Pass 5: pack GPU segments (uniform 6-float quads) ──
 
     let gpu_seg_base = (gpu_segments.len() / 6) as u32;
@@ -642,6 +647,7 @@ for i in 0..n_quads {
                 payload: paint_payload,
                 paint_and_rect_flag: final_paint_flag,
                 depth_index,
+                _final_pad: 0
             });
             n_emitted += 1;
         }
@@ -677,7 +683,7 @@ pub struct Scene {
     encoder_n_segments: RefCell<u32>,
     encoder_n_paths: RefCell<u32>,
  
-    next_depth: RefCell<u32>,
+    next_depth: i32,
  
     level: Level,
 }
@@ -696,7 +702,7 @@ impl Scene {
             encoder_quads: RefCell::new(Vec::new()),
             encoder_n_segments: RefCell::new(0),
             encoder_n_paths: RefCell::new(0),
-            next_depth: RefCell::new(0),
+            next_depth: 0,
             level,
         }
     }
@@ -719,19 +725,19 @@ impl Scene {
         };
         let final_paint_flag = paint_flag | (fill_rule_word << FILL_RULE_SHIFT);
  
-        let depth = {
-            let mut d = self.next_depth.borrow_mut();
-            let cur = *d;
-            *d += 1;
-            cur
-        };
- 
+        let depth = self.next_depth as u32;
+        self.next_depth += 1;
         // Dispatch into SIMD-specific implementation
         dispatch!(self.level, simd => self.fill_impl(
             simd, style, transform, payload, final_paint_flag, depth, shape
         ));
  
         let _ = brush_transform; // unused for now
+    }
+
+
+    pub fn depth(&mut self) -> i32{
+        self.next_depth
     }
  
     #[inline(always)]
@@ -767,18 +773,7 @@ impl Scene {
             encoder.shape(shape);
         }
  
-        log::debug!(
-            "Encoded path: {} lines, {} quads",
-            lines.len() / 4,
-            quads.len() / 6,
-        );
-      for i in 0..lines.len() {
-            log::debug!("{}", lines[i]);
-        }
-           for i in 0..quads.len() {
-            log::debug!("{}", quads[i]);
-        }
-        
+
         // ── Bin and emit GPU tiles ──
         let mut tiles = self.tiles.borrow_mut();
         let mut segments = self.segments.borrow_mut();
@@ -804,7 +799,7 @@ impl Scene {
     pub fn clear(&mut self) {
         self.segments.borrow_mut().clear();
         self.tiles.borrow_mut().clear();
-        *self.next_depth.borrow_mut() = 0;
+        self.next_depth = 0;
     }
  
     pub fn tiles(&self) -> Ref<'_, Vec<Tile>> {

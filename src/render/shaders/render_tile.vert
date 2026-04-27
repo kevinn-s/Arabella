@@ -76,7 +76,7 @@
     flat out uint  v_paint_flag;         // source/type/fill_rule packed
     flat out uvec2 v_tile_origin_pixels; // top-left pixel of this tile
     out vec2 v_local_xy;                 // pixel position within the screen
-
+flat out uint v_depth_index;
     void main() {
         // ── Unpack tile attributes ──
         uint tile_x_idx = a_xy & 0xFFFFu;
@@ -108,9 +108,8 @@
         // Lower depth_index = drawn first = behind.
         // GL depth is [-1, +1], with +1 = farthest. Map small index to high depth.
         // Use a generous range; assume up to ~4M paths.
-        float depth = 1.0 - (float(a_misc.z) + 1.0) / 16777216.0;
-
-        gl_Position = vec4(ndc, depth, 1.0);
+       float depth = 1.0 - (float(a_misc.z) / 10000.0) * 2.0;
+gl_Position = vec4(ndc, depth, 1.0);
 
         // ── Pass to fragment shader ──
         v_backdrop = a_backdrop;
@@ -122,4 +121,5 @@
             tile_y_idx * TILE_HEIGHT
         );
         v_local_xy = pixel_pos;
+        v_depth_index = a_misc.z;
     }

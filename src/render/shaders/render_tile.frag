@@ -56,6 +56,8 @@ flat in uvec2 v_segment;
 flat in uint  v_payload;
 flat in uint  v_paint_flag;
 flat in uvec2 v_tile_origin_pixels;
+// Add this line to your Fragment Shader
+flat in uint v_depth_index;
 in vec2 v_local_xy;
 
 out vec4 fragColor;
@@ -128,6 +130,7 @@ void read_segment(uint seg_offset, out vec2 p0, out vec2 p1, out vec2 p2) {
 // Extended Implicit Geometry (Strict Bounding)
 // ============================================================================
 float quad_implicit_contribution(vec2 p0, vec2 p1, vec2 p2, vec2 pixel) {
+    // --- 1. Direction of traversal ---
     float y_min, y_max, sign_v;
     if (p2.y > p0.y) {
         sign_v = 1.0; y_min = p0.y; y_max = p2.y;
@@ -137,25 +140,24 @@ float quad_implicit_contribution(vec2 p0, vec2 p1, vec2 p2, vec2 pixel) {
         return 0.0;
     }
 
-    // Half-open interval prevents double-counting winding where segments connect
+    // --- 2. Y-bounds (half-open to avoid double counting at segment joins) ---
     if (pixel.y < y_min || pixel.y >= y_max) {
         return 0.0;
     }
 
-    // 1. Calculate X on the Chord (straight line P0 -> P2)
+    // --- 3. Compute x on chord and on active control leg at pixel.y ---
     float t_chord = (pixel.y - p0.y) / (p2.y - p0.y);
     float x_chord = p0.x + t_chord * (p2.x - p0.x);
 
-    // 2. Calculate X on the Control Legs (P0 -> P1 -> P2)
     float x_leg;
     bool on_first_leg = (sign_v > 0.0) ? (pixel.y < p1.y) : (pixel.y > p1.y);
-    
+
     if (on_first_leg) {
-        // Division by zero is mathematically impossible here due to the boolean check
+        // Active leg: P0 → P1
         float t_leg = (pixel.y - p0.y) / (p1.y - p0.y);
         x_leg = p0.x + t_leg * (p1.x - p0.x);
     } else {
-        // Protect against a perfectly horizontal second leg
+        // Active leg: P1 → P2
         if (abs(p2.y - p1.y) < 1e-6) {
             x_leg = p2.x;
         } else {
@@ -164,21 +166,32 @@ float quad_implicit_contribution(vec2 p0, vec2 p1, vec2 p2, vec2 pixel) {
         }
     }
 
-    // 3. Strict Triangle Bounds Check (Eliminates the Extraneous Root spike bug!)
+    // --- 4. Strict triangle bounds: handle T2 ∪ T3 region ---
     float x_min_tri = min(x_chord, x_leg);
     float x_max_tri = max(x_chord, x_leg);
 
     if (pixel.x > x_max_tri) {
-        return sign_v; // Strictly right of the entire curve triangle
+        return sign_v; // in T2 ∪ T3 → inside
     } else if (pixel.x < x_min_tri) {
-        return 0.0;    // Strictly left of the entire curve triangle
+        return 0.0;    // left of entire control triangle → outside
     }
 
-    // 4. Inside the Triangle: Loop-Blinn Implicit Math
+    // --- 5. Inside T1: implicit Loop-Blinn test ---
+    // Loop-Blinn texture coordinates:
+    //   u = 0.5 * w1 + w2
+    //   v = w2
+    //   f(u, v) = u² - v
+    //
+    // P0 → (u=0, v=0) → f = 0    (on curve)
+    // P1 → (u=0.5, v=0) → f = 0.25 (P1 is on the f > 0 side = bulge side)
+    // P2 → (u=1, v=1) → f = 0    (on curve)
+    //
+    // f > 0 ⟺ pixel is on the BULGE side (P1 side) of the curve
+    // f < 0 ⟺ pixel is on the CHORD side (wedge side) of the curve
+
     float denom = (p1.y - p2.y) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.y - p2.y);
     if (abs(denom) < 1e-6) {
-        // Degenerate triangle (straight line). Since we are inside the horizontal bounds,
-        // we are practically on the line. Default to right-of-chord behavior.
+        // Degenerate triangle — treat as line, default to chord comparison
         return (pixel.x > x_chord) ? sign_v : 0.0;
     }
 
@@ -191,16 +204,19 @@ float quad_implicit_contribution(vec2 p0, vec2 p1, vec2 p2, vec2 pixel) {
     float v = w2;
     float f = u * u - v;
 
-    // 5. Evaluate Bulge Side & Boolean Union
+    if (abs(f) < 0.0001) {
+    return (pixel.x > x_chord) ? sign_v : 0.0;
+}
+
+    // --- 6. Choose the correct half of T1 based on bulge direction ---
     bool bulges_right = x_leg > x_chord;
+
     if (bulges_right) {
-        // Curve bulges right. Region f>0 is the bulge containing P1.
-        // To be right of the curve, you must be in the bulge.
-        return (f > 0.0) ? sign_v * -1.0 : 0.0;
+        // Right-bulge: WEDGE half (chord side, f < 0) is inside.
+        return (f > 0.0) ? sign_v : 0.0;
     } else {
-        // Curve bulges left. Region f>0 is the bulge containing P1.
-        // To be right of the curve, you must be OUTSIDE the bulge.
-        return (f < 0.0) ? sign_v * -1.0 : 0.0;
+        // Left-bulge: BULGE-CHORD WEDGE (P1 side, f > 0) is inside.
+        return (f < 0.0) ? sign_v : 0.0;
     }
 }
 
@@ -235,75 +251,62 @@ void main() {
     uint seg_count  = v_segment.x;
     uint seg_offset = v_segment.y;
 
-    vec2 pixel_xy = gl_FragCoord.xy;
-    if (u_negate_ndc == 0u) {
-        pixel_xy.y = float(u_height) - pixel_xy.y;
-    }
     int local_y = int(v_local_xy.y - float(v_tile_origin_pixels.y));
     local_y = clamp(local_y, 0, 3);
-    int row_backdrop = get_row_backdrop(local_y);
-
-    int pixel_row = int(pixel_xy.y) - int(v_tile_origin_pixels.y);
-    pixel_row = clamp(pixel_row, 0, TILE_PIXEL_ROWS - 1);
-
-    float backdrop = float(get_backdrop(v_backdrop, local_y));
-
-    // ── Solid tile fast path ──
-    if (seg_count == 0u) {
-        float solid_coverage = 0.0;
-        if (fill_rule == FILL_RULE_EVENODD) {
-            solid_coverage = 1.0 - abs(mod(backdrop, 2.0) - 1.0);
-        } else {
-            solid_coverage = clamp(abs(backdrop), 0.0, 1.0);
-        }
-
-        if (solid_coverage > 0.0) {
-            vec4 paint = resolve_paint();
-            fragColor = vec4(0.0,0.0,0.0,float((int(v_backdrop.x))));
-            return;
-        } else {
-            discard;
-        }
-    }
+    int row_winding_start = get_row_backdrop(local_y);
 
     float coverage = 0.0;
 
+    // 4x4 Supersampling
     for (int sx = 0; sx < 4; sx++) {
         for (int sy = 0; sy < 4; sy++) {
-            bool sample_filled;
-                vec2 offset = vec2((float(sx) - 1.5) * 0.25, (float(sy) - 1.5) * 0.25);
-                vec2 sample_pos = v_local_xy + offset;
-                float sample_winding = float(row_backdrop);
-                   for (uint s = 0u; s < seg_count; s++) {
-                     uint tex_base = (seg_offset + s) * 2u;
+            vec2 subpixel_offset = (vec2(float(sx), float(sy)) + 0.5) * 0.25 - 0.5;
+            vec2 sample_pos = v_local_xy + subpixel_offset;
+            
+            float sample_winding = float(row_winding_start) / 256.0;;
+
+            // Accumulate ALL segments for this sub-sample
+            for (uint s = 0u; s < seg_count; s++) {
+                uint tex_base = (seg_offset + s) * 2u;
                 vec4 tex0 = fetch_segment_data(tex_base);
                 vec4 tex1 = fetch_segment_data(tex_base + 1u);
-                
-                vec2 p0 = tex0.xy;
-                vec2 p1 = tex0.zw;
-                vec2 p2 = tex1.xy;
-                sample_winding += quad_implicit_contribution(p0,p1,p2,sample_pos);
-                sample_filled = (fill_rule == 0u) ? (abs(sample_winding) > 0.01) : ((int(abs(sample_winding)) % 2) != 0);
-                  if (sample_filled) {
-                    if (p2.y > p0.y) {
-    coverage = float((int(v_backdrop.x) << 16) >> 16);
-}
-               if (p0.y > p2.y) {
-    coverage += 1.0;
-}
-                  }
-                   }
+                sample_winding += quad_implicit_contribution(tex0.xy, tex0.zw, tex1.xy, sample_pos);
+            }
 
-  
-              
+            // Apply Fill Rule
+            bool filled = false;
+            if (fill_rule == FILL_RULE_NONZERO) {
+                filled = abs(sample_winding) > 0.1;
+            } else {
+                filled = (int(abs(round(sample_winding))) % 2) != 0;
+            }
+
+            if (filled) coverage += 1.0;
         }
     }
-   
+
     coverage /= 16.0;
+
     if (coverage < 0.001) {
         discard;
     }
 
-    vec4 paint = resolve_paint();
-    fragColor = vec4(0.0,0.0,0.0,1.0);
+// if (coverage > 0.0) {
+//     // Generate a pseudo-random color based on the depth index
+//     float h = float(v_depth_index) * 0.1; // Offset for the color wheel
+//     vec3 debug_color = vec3(
+//         abs(sin(h + 0.0)),
+//         abs(sin(h + 2.09)), // 120 degrees apart
+//         abs(sin(h + 4.18))  // 240 degrees apart
+//     );
+    
+//     fragColor = vec4(debug_color, 1.0);
+//     return;
+// }
+
+    // Resolve Paint (Simplified for Solid)
+    vec4 paint = unpack_rgba8(v_payload);
+  
+    // Apply coverage as alpha (Assuming premultiplied or simple blend)
+    fragColor = paint * coverage;
 }

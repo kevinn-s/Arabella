@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Binning phase visualizer — process_line_segment</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161922;
+    --panel-2: #1d212c;
+    --ink: #e6e8ee;
+    --muted: #9aa3b2;
+    --accent: #6aa6ff;
+    --accent-2: #ffd166;
+    --grid: #2a2f3c;
+    --grid-strong: #3a4154;
+    --tile-visited: rgba(106,166,255,0.10);
+    --tile-current: rgba(255,209,102,0.18);
+    --line: #ffd166;
+    --line-clip: #ff6b6b;
+    --fill: #6aa6ff;
+    --aux: #b388ff;
+    --plus: #4ade80;
+    --minus: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: grid; grid-template-columns: 1fr 360px; min-height: 100vh;
+  }
+  .stage { padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .panel {
+    background: var(--panel); border: 1px solid #232838; border-radius: 10px;
+    padding: 12px;
+  }
+  .panel h2 {
+    margin: 0 0 8px 0; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600;
+  }
+  canvas { display: block; width: 100%; height: auto; background: #0b0d12; border-radius: 8px; }
+  .side { padding: 14px; display: flex; flex-direction: column; gap: 10px;
+    border-left: 1px solid #1c2030; background: var(--panel); overflow-y: auto; max-height: 100vh; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .row label { color: var(--muted); min-width: 72px; }
+  input[type="number"] {
+    width: 72px; background: var(--panel-2); color: var(--ink);
+    border: 1px solid #2a2f3c; border-radius: 6px; padding: 4px 6px;
+  }
+  input[type="range"] { flex: 1; }
+  button {
+    background: var(--panel-2); color: var(--ink);
+    border: 1px solid #2a2f3c; border-radius: 6px; padding: 6px 10px; cursor: pointer;
+  }
+  button:hover { border-color: #3a4154; }
+  button.primary { background: var(--accent); color: #0b0d12; border-color: transparent; }
+  button.primary:hover { filter: brightness(1.05); }
+  .legend { display: grid; grid-template-columns: 14px 1fr; gap: 6px 8px; align-items: center; }
+  .sw { width: 14px; height: 14px; border-radius: 3px; }
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 4px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  .kv .k { color: var(--muted); }
+  .log {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
+    background: #0b0d12; border: 1px solid #1c2030; border-radius: 6px; padding: 8px;
+    height: 180px; overflow: auto; white-space: pre-wrap;
+  }
+  .pill { padding: 1px 6px; border-radius: 999px; background: var(--panel-2); border: 1px solid #2a2f3c; color: var(--muted); font-size: 11px; }
+  .footnote { color: var(--muted); font-size: 12px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="panel">
+      <h2>Binning phase — interactive walkthrough</h2>
+      <div class="footnote">
+        Drag the line endpoints. Step through the algorithm or play it. The grid is the tile grid
+        (default 16×16). The view box is the dashed rectangle; segments outside it are clipped.
+        This mirrors <code>process_line_segment</code> from Pathfinder-style tile binning.
+      </div>
+      <details style="margin-top:8px">
+        <summary class="footnote" style="cursor:pointer">What is this algorithm doing?</summary>
+        <div class="footnote" style="margin-top:6px">
+          The function takes one line segment of a path and figures out which tiles it crosses.
+          For each tile it touches, it emits an <code>add_fill</code> with the clipped sub-segment.
+          It walks tiles using the Amanatides–Woo DDA: <code>t_max</code> tracks the parametric
+          distance to the next vertical/horizontal grid line, and <code>t_delta</code> is how
+          much <code>t_max</code> advances per tile in each axis. Two extra bookkeeping rules:
+          (1) when the segment crosses a <em>top</em> tile boundary, an auxiliary segment is
+          emitted to or from the tile's top-left corner so the winding integral stays consistent
+          across tiles whose tops lie above the view box; (2) when the segment crosses a
+          <em>right</em> tile boundary, the destination tile's backdrop is incremented by ±1,
+          recording a winding contribution from the implicit horizontal ray to the right edge.
+        </div>
+      </details>
+    </div>
+    <div class="panel" style="flex:1; min-height: 0;">
+      <canvas id="cv" width="900" height="640"></canvas>
+    </div>
+    <div class="panel">
+      <h2>Legend</h2>
+      <div class="legend">
+        <span class="sw" style="background:var(--line)"></span><span>Input line segment</span>
+        <span class="sw" style="background:var(--line-clip)"></span><span>Clipped portion (outside view box)</span>
+        <span class="sw" style="background:var(--fill)"></span><span><code>add_fill</code> — clipped sub-segment per tile</span>
+        <span class="sw" style="background:var(--aux)"></span><span>Auxiliary segment (top-boundary entry/exit)</span>
+        <span class="sw" style="background:var(--plus)"></span><span>Backdrop +1 (entered through right boundary)</span>
+        <span class="sw" style="background:var(--minus)"></span><span>Backdrop −1 (leaving through right boundary)</span>
+        <span class="sw" style="background:var(--tile-current)"></span><span>Current tile</span>
+        <span class="sw" style="background:var(--tile-visited)"></span><span>Visited tile</span>
+      </div>
+    </div>
+  </div>
+
+  <aside class="side">
+    <div class="panel">
+      <h2>Controls</h2>
+      <div class="row">
+        <button id="back">◀ Step back</button>
+        <button id="step" class="primary">Step ▶</button>
+        <button id="play">Play ⏵</button>
+        <button id="reset">Reset</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label>Speed</label>
+        <input id="speed" type="range" min="60" max="1200" value="450" />
+      </div>
+      <div class="row">
+        <label>Tile size</label>
+        <input id="tile" type="number" min="8" max="64" step="4" value="32" />
+        <span class="pill" id="tilePill">TILE=32</span>
+      </div>
+      <div class="row">
+        <label>View box</label>
+        <input id="vbW" type="number" value="20" /> ×
+        <input id="vbH" type="number" value="14" />
+        <span class="pill">tiles</span>
+      </div>
+      <div class="row">
+        <button id="rand">🎲 Random segment</button>
+        <button id="preset1">Preset: ↘ down-right</button>
+      </div>
+      <div class="row">
+        <button id="preset2">Preset: ↗ up-right</button>
+        <button id="preset3">Preset: clip outside</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Endpoint coordinates (pixels)</h2>
+      <div class="grid2">
+        <div class="row"><label>from.x</label><input id="ax" type="number" step="1" /></div>
+        <div class="row"><label>from.y</label><input id="ay" type="number" step="1" /></div>
+        <div class="row"><label>to.x</label><input id="bx" type="number" step="1" /></div>
+        <div class="row"><label>to.y</label><input id="by" type="number" step="1" /></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>State (after current step)</h2>
+      <div class="kv" id="state"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Step description</h2>
+      <div id="desc" class="footnote" style="min-height: 38px;"></div>
+    </div>
+
+    <div class="panel" style="flex:1; min-height: 0;">
+      <h2>Event log</h2>
+      <div id="log" class="log"></div>
+    </div>
+  </aside>
+
+<script>
+"use strict";
+
+/* ---------- Math helpers (mirroring the Rust types loosely) ---------- */
+const v2 = (x, y) => ({ x, y });
+const sub = (a, b) => v2(a.x - b.x, a.y - b.y);
+const add = (a, b) => v2(a.x + b.x, a.y + b.y);
+const mul = (a, b) => v2(a.x * b.x, a.y * b.y);
+const div = (a, b) => v2(a.x / b.x, a.y / b.y);
+const abs = (a) => v2(Math.abs(a.x), Math.abs(a.y));
+const floorV = (a) => v2(Math.floor(a.x), Math.floor(a.y));
+const lerp = (a, b, t) => v2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+
+/* ---------- Liang–Barsky line clipping to a rect ---------- */
+function clipLineToRect(p0, p1, rect) {
+  // rect.minY may be -Infinity to mirror the real clip_box from the Rust code:
+  //   clip_box = RectF::from_points(vec2f(view_box.min_x(), NEG_INFINITY),
+  //                                 view_box.lower_right());
+  let t0 = 0, t1 = 1;
+  const dx = p1.x - p0.x, dy = p1.y - p0.y;
+  const ps = [-dx, dx, -dy, dy];
+  const qs = [p0.x - rect.minX, rect.maxX - p0.x, p0.y - rect.minY, rect.maxY - p0.y];
+  for (let i = 0; i < 4; i++) {
+    const p = ps[i], q = qs[i];
+    // Skip an edge whose constraint is unbounded (e.g. minY = -Infinity).
+    if (!isFinite(q) && q > 0) continue;
+    if (p === 0) { if (q < 0) return null; }
+    else {
+      const r = q / p;
+      if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
+      else       { if (r < t0) return null; if (r < t1) t1 = r; }
+    }
+  }
+  return {
+    from: v2(p0.x + t0 * dx, p0.y + t0 * dy),
+    to:   v2(p0.x + t1 * dx, p0.y + t1 * dy),
+    t0, t1,
+  };
+}
+
+/* ---------- The binning algorithm reimagined as a list of "events" ---------- */
+/* Each event is one iteration of the loop, capturing every observable side
+   effect from the original Rust code. Pre-building the trace lets us scrub
+   forward and backward through the algorithm. */
+function buildTrace({ from, to, tileSize, viewBox }) {
+  const events = [];
+  const log = [];
+
+  // 1) Clip to view box. The original uses clip_box = (min_x, -inf) -> lower_right,
+  //    i.e. only the bottom and right and left edges; we clip to the full view box
+  //    here for visualization clarity. The above-view-box region is what produces
+  //    the "top boundary" auxiliary segments via the Y-step bookkeeping below.
+  const clip = clipLineToRect(from, to, viewBox);
+  if (!clip) {
+    events.push({ kind: "clipped-out", from, to });
+    log.push("Segment fully outside clip_box — early return.");
+    return { events, log, clipped: null };
+  }
+  const seg = { from: clip.from, to: clip.to };
+  if (clip.t0 > 0 || clip.t1 < 1) {
+    log.push(`Clipped to view box (t0=${clip.t0.toFixed(3)}, t1=${clip.t1.toFixed(3)}).`);
+  }
+
+  // 2) Set up tile coordinates and Amanatides–Woo deltas.
+  const tile = v2(tileSize, tileSize);
+  const tileRecip = v2(1 / tile.x, 1 / tile.y);
+  const fromTile = floorV(mul(seg.from, tileRecip));
+  const toTile   = floorV(mul(seg.to,   tileRecip));
+  const vec = sub(seg.to, seg.from);
+  const negx = vec.x < 0, negy = vec.y < 0;
+  const step = v2(negx ? -1 : 1, negy ? -1 : 1);
+  const firstCrossing = mul(
+    v2(fromTile.x + (negx ? 0 : 1), fromTile.y + (negy ? 0 : 1)),
+    tile
+  );
+  // Guard division by zero (vertical/horizontal segments).
+  const safeVec = v2(vec.x === 0 ? 1e-30 : vec.x, vec.y === 0 ? 1e-30 : vec.y);
+  let tMax = div(sub(firstCrossing, seg.from), safeVec);
+  const tDelta = abs(div(tile, safeVec));
+
+  log.push(`from_tile=(${fromTile.x},${fromTile.y})  to_tile=(${toTile.x},${toTile.y})`);
+  log.push(`step=(${step.x},${step.y})  t_delta=(${tDelta.x.toFixed(3)},${tDelta.y.toFixed(3)})`);
+
+  // 3) Walk tiles, emitting one event per loop iteration.
+  let curr = { ...seg.from };
+  let tileCoords = { ...fromTile };
+  let lastDir = null;
+  // Safety: bound iterations.
+  const maxIter = 4000;
+  let iter = 0;
+
+  while (iter++ < maxIter) {
+    // Choose next direction (X if t_max.x < t_max.y, Y if greater, tie -> step.x>0 ? X : Y)
+    let dir;
+    if (tMax.x < tMax.y) dir = "X";
+    else if (tMax.x > tMax.y) dir = "Y";
+    else dir = step.x > 0 ? "X" : "Y";
+
+    const rawT = (dir === "X" ? tMax.x : tMax.y);
+    const nextT = Math.min(rawT, 1.0);
+
+    // If we've reached the end tile, do not step.
+    const atEnd = (tileCoords.x === toTile.x && tileCoords.y === toTile.y);
+    const nextDir = atEnd ? null : dir;
+
+    const nextPos = lerp(seg.from, seg.to, nextT);
+    const fillSeg = { from: { ...curr }, to: { ...nextPos }, tile: { ...tileCoords } };
+
+    const auxFills = [];
+    const backdrops = [];
+
+    // Auxiliary fills.
+    if (step.y < 0 && nextDir === "Y") {
+      // Leaves through top boundary (going up).
+      auxFills.push({
+        from: { ...fillSeg.to },
+        to:   v2(tileCoords.x * tile.x, tileCoords.y * tile.y),
+        tile: { ...tileCoords },
+        reason: "leaves through top boundary",
+      });
+    } else if (step.y > 0 && lastDir === "Y") {
+      // Entered through top boundary (going down).
+      auxFills.push({
+        from: v2(tileCoords.x * tile.x, tileCoords.y * tile.y),
+        to:   { ...fillSeg.from },
+        tile: { ...tileCoords },
+        reason: "enters through top boundary",
+      });
+    }
+
+    // Backdrop adjustments on right-boundary crossings.
+    if (step.x < 0 && lastDir === "X") {
+      backdrops.push({ tile: { ...tileCoords }, delta: +1, reason: "entered through right boundary" });
+    } else if (step.x > 0 && nextDir === "X") {
+      backdrops.push({ tile: { ...tileCoords }, delta: -1, reason: "leaving through right boundary" });
+    }
+
+    events.push({
+      kind: "iter",
+      iter: iter - 1,
+      tileCoords: { ...tileCoords },
+      fillSeg,
+      auxFills,
+      backdrops,
+      tMax: { ...tMax },
+      dir, nextDir, nextT,
+      curr: { ...curr },
+      lastDir,
+    });
+
+    if (nextDir === null) break;
+
+    // Take a step.
+    if (nextDir === "X") {
+      if (tileCoords.x === toTile.x) break;
+      tMax = v2(tMax.x + tDelta.x, tMax.y);
+      tileCoords = v2(tileCoords.x + step.x, tileCoords.y);
+    } else {
+      if (tileCoords.y === toTile.y) break;
+      tMax = v2(tMax.x, tMax.y + tDelta.y);
+      tileCoords = v2(tileCoords.x, tileCoords.y + step.y);
+    }
+    curr = nextPos;
+    lastDir = nextDir;
+  }
+
+  return {
+    events, log,
+    clipped: seg,
+    fromTile, toTile, step, tDelta, vec,
+    tile,
+  };
+}
+
+/* ---------- Renderer ---------- */
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+
+function fitCanvas() {
+  // Match the displayed CSS size with the backing-store pixel size for crispness.
+  const rect = cv.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(rect.width * dpr);
+  cv.height = Math.round(rect.height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener("resize", () => { fitCanvas(); render(); });
+
+const state = {
+  tileSize: 32,
+  vbTilesW: 20,
+  vbTilesH: 14,
+  from: v2(50, 380),
+  to:   v2(580, 80),
+  cursor: 0,           // index into trace.events (0 = before any iter)
+  trace: null,
+  playing: false,
+  drag: null,          // 'a' | 'b' | null
+};
+
+function viewBoxRect() {
+  // Mirrors clip_box from the Rust source: only the left, right and bottom
+  // edges of the view_box are clip boundaries (top is unbounded).
+  return {
+    minX: 0, minY: -Infinity,
+    maxX: state.vbTilesW * state.tileSize,
+    maxY: state.vbTilesH * state.tileSize,
+  };
+}
+function visibleViewBoxRect() {
+  return {
+    minX: 0, minY: 0,
+    maxX: state.vbTilesW * state.tileSize,
+    maxY: state.vbTilesH * state.tileSize,
+  };
+}
+
+function rebuildTrace() {
+  state.trace = buildTrace({
+    from: state.from, to: state.to,
+    tileSize: state.tileSize,
+    viewBox: viewBoxRect(),
+  });
+  state.cursor = Math.min(state.cursor, state.trace.events.length);
+  updateUI();
+  render();
+}
+
+/* World-to-canvas mapping: we draw in pixel space directly, using a margin.
+   We allocate room for some tiles above y=0 so the user can see the algorithm
+   walk into negative-y tiles when a segment leaves through the top boundary. */
+const MARGIN = 30;
+const ABOVE_TILES = 4; // number of tiles to render above y=0
+function worldExtent() {
+  const w = state.vbTilesW * state.tileSize;
+  const h = (state.vbTilesH + ABOVE_TILES) * state.tileSize;
+  return { w, h, yOffset: ABOVE_TILES * state.tileSize };
+}
+function scaleFactor() {
+  const rect = cv.getBoundingClientRect();
+  const { w, h } = worldExtent();
+  const sx = (rect.width  - 2 * MARGIN) / w;
+  const sy = (rect.height - 2 * MARGIN) / h;
+  return Math.min(sx, sy);
+}
+function w2c(p) {
+  const s = scaleFactor();
+  const { yOffset } = worldExtent();
+  return { x: MARGIN + p.x * s, y: MARGIN + (p.y + yOffset) * s };
+}
+function c2w(p) {
+  const s = scaleFactor();
+  const { yOffset } = worldExtent();
+  return { x: (p.x - MARGIN) / s, y: (p.y - MARGIN) / s - yOffset };
+}
+
+function drawArrow(a, b, color, width = 2) {
+  const A = w2c(a), B = w2c(b);
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+  // arrow head
+  const dx = B.x - A.x, dy = B.y - A.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return;
+  const ux = dx / len, uy = dy / len;
+  const hx = B.x - ux * 9, hy = B.y - uy * 9;
+  const px = -uy, py = ux;
+  ctx.beginPath();
+  ctx.moveTo(B.x, B.y);
+  ctx.lineTo(hx + px * 4.5, hy + py * 4.5);
+  ctx.lineTo(hx - px * 4.5, hy - py * 4.5);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function render() {
+  fitCanvasIfNeeded();
+  const rect = cv.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  const tile = state.tileSize;
+  const { w: ww, h: wh, yOffset } = worldExtent();
+  const yMinTile = -ABOVE_TILES;
+  const yMaxTile = state.vbTilesH;
+
+  // Background of the whole canvas
+  ctx.fillStyle = "#0b0d12";
+  ctx.fillRect(0, 0, rect.width, rect.height);
+
+  // Tile grid (extended above y=0 so above-view-box tiles are visible)
+  ctx.strokeStyle = "#2a2f3c";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x <= state.vbTilesW; x++) {
+    const p0 = w2c(v2(x * tile, yMinTile * tile));
+    const p1 = w2c(v2(x * tile, yMaxTile * tile));
+    ctx.moveTo(p0.x + 0.5, p0.y); ctx.lineTo(p1.x + 0.5, p1.y);
+  }
+  for (let y = yMinTile; y <= yMaxTile; y++) {
+    const p0 = w2c(v2(0, y * tile));
+    const p1 = w2c(v2(state.vbTilesW * tile, y * tile));
+    ctx.moveTo(p0.x, p0.y + 0.5); ctx.lineTo(p1.x, p1.y + 0.5);
+  }
+  ctx.stroke();
+
+  // Shade the "above the view box" region lightly
+  const aboveTL = w2c(v2(0, yMinTile * tile));
+  const aboveBR = w2c(v2(state.vbTilesW * tile, 0));
+  ctx.fillStyle = "rgba(255,255,255,0.02)";
+  ctx.fillRect(aboveTL.x, aboveTL.y, aboveBR.x - aboveTL.x, aboveBR.y - aboveTL.y);
+
+  // Visible view box outline (dashed) — this is view_box, not clip_box.
+  const vb = visibleViewBoxRect();
+  const vbA = w2c(v2(vb.minX, vb.minY)), vbB = w2c(v2(vb.maxX, vb.maxY));
+  ctx.save();
+  ctx.setLineDash([6, 4]);
+  ctx.strokeStyle = "#3a4154";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(vbA.x, vbA.y, vbB.x - vbA.x, vbB.y - vbA.y);
+  ctx.restore();
+
+  // Visited & current tiles (up to cursor)
+  const tr = state.trace;
+  if (tr && tr.clipped) {
+    for (let i = 0; i < state.cursor && i < tr.events.length; i++) {
+      const e = tr.events[i];
+      const A = w2c(v2(e.tileCoords.x * tile, e.tileCoords.y * tile));
+      ctx.fillStyle = "rgba(106,166,255,0.10)";
+      ctx.fillRect(A.x + 0.5, A.y + 0.5, tile * scaleFactor() - 1, tile * scaleFactor() - 1);
+    }
+    // Highlight current tile (next pending iter, or the last if at the end)
+    const idx = Math.min(state.cursor, tr.events.length - 1);
+    if (idx >= 0) {
+      const cur = tr.events[idx];
+      const A = w2c(v2(cur.tileCoords.x * tile, cur.tileCoords.y * tile));
+      ctx.fillStyle = "rgba(255,209,102,0.18)";
+      ctx.fillRect(A.x + 0.5, A.y + 0.5, tile * scaleFactor() - 1, tile * scaleFactor() - 1);
+    }
+  }
+
+  // Original line (full, including any clipped-away portion)
+  ctx.save();
+  ctx.setLineDash([3, 3]);
+  drawArrow(state.from, state.to, "#ff6b6b", 1.5);
+  ctx.restore();
+
+  // Clipped line segment (the one the algorithm actually walks)
+  if (tr && tr.clipped) {
+    drawArrow(tr.clipped.from, tr.clipped.to, "#ffd166", 2);
+  }
+
+  // Emitted fills + auxiliaries + backdrop markers up to cursor
+  if (tr && tr.clipped) {
+    for (let i = 0; i < state.cursor && i < tr.events.length; i++) {
+      const e = tr.events[i];
+      drawArrow(e.fillSeg.from, e.fillSeg.to, "#6aa6ff", 2);
+      for (const aux of e.auxFills) drawArrow(aux.from, aux.to, "#b388ff", 2);
+      for (const bd of e.backdrops) {
+        const cx = bd.tile.x * tile + tile / 2;
+        const cy = bd.tile.y * tile + tile / 2;
+        const C = w2c(v2(cx, cy));
+        ctx.fillStyle = bd.delta > 0 ? "#4ade80" : "#f87171";
+        ctx.beginPath(); ctx.arc(C.x, C.y, 9, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#0b0d12";
+        ctx.font = "bold 12px ui-monospace, Menlo, Consolas, monospace";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(bd.delta > 0 ? "+1" : "−1", C.x, C.y + 0.5);
+      }
+    }
+  }
+
+  // Endpoint handles
+  drawHandle(state.from, "A");
+  drawHandle(state.to, "B");
+}
+
+function drawHandle(p, label) {
+  const P = w2c(p);
+  ctx.beginPath(); ctx.fillStyle = "#fff"; ctx.arc(P.x, P.y, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.strokeStyle = "#0b0d12"; ctx.lineWidth = 2; ctx.arc(P.x, P.y, 6, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = "#0b0d12"; ctx.font = "bold 10px ui-monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(label, P.x, P.y + 0.5);
+}
+
+let lastFitW = 0, lastFitH = 0;
+function fitCanvasIfNeeded() {
+  const rect = cv.getBoundingClientRect();
+  if (rect.width !== lastFitW || rect.height !== lastFitH) {
+    fitCanvas();
+    lastFitW = rect.width; lastFitH = rect.height;
+  }
+}
+
+/* ---------- UI wiring ---------- */
+const $ = (id) => document.getElementById(id);
+const inputs = {
+  ax: $("ax"), ay: $("ay"), bx: $("bx"), by: $("by"),
+  tile: $("tile"), vbW: $("vbW"), vbH: $("vbH"),
+  speed: $("speed"),
+};
+
+function updateUI() {
+  inputs.ax.value = state.from.x.toFixed(0);
+  inputs.ay.value = state.from.y.toFixed(0);
+  inputs.bx.value = state.to.x.toFixed(0);
+  inputs.by.value = state.to.y.toFixed(0);
+  $("tilePill").textContent = `TILE=${state.tileSize}`;
+
+  const tr = state.trace;
+  const stateEl = $("state");
+  const descEl = $("desc");
+  const logEl = $("log");
+
+  if (!tr) { stateEl.innerHTML = ""; descEl.textContent = ""; logEl.textContent = ""; return; }
+
+  const fmt = (p) => `(${p.x.toFixed(2)}, ${p.y.toFixed(2)})`;
+  const fmtI = (p) => `(${p.x}, ${p.y})`;
+
+  const idx = Math.min(state.cursor - 1, tr.events.length - 1);
+  const cur = idx >= 0 ? tr.events[idx] : null;
+
+  let kv = "";
+  if (!tr.clipped) {
+    kv += `<div class="k">clipping</div><div>fully outside view box → return</div>`;
+  } else {
+    kv += `<div class="k">clipped.from</div><div>${fmt(tr.clipped.from)}</div>`;
+    kv += `<div class="k">clipped.to</div><div>${fmt(tr.clipped.to)}</div>`;
+    kv += `<div class="k">vector</div><div>${fmt(tr.vec)}</div>`;
+    kv += `<div class="k">from_tile</div><div>${fmtI(tr.fromTile)}</div>`;
+    kv += `<div class="k">to_tile</div><div>${fmtI(tr.toTile)}</div>`;
+    kv += `<div class="k">step</div><div>${fmtI(tr.step)}</div>`;
+    kv += `<div class="k">t_delta</div><div>${fmt(tr.tDelta)}</div>`;
+    if (cur) {
+      kv += `<div class="k">iter</div><div>${cur.iter}</div>`;
+      kv += `<div class="k">tile_coords</div><div>${fmtI(cur.tileCoords)}</div>`;
+      kv += `<div class="k">t_max</div><div>${fmt(cur.tMax)}</div>`;
+      kv += `<div class="k">chosen dir</div><div>${cur.dir}${cur.nextDir === null ? " (no step — at end tile)" : ""}</div>`;
+      kv += `<div class="k">last_step_dir</div><div>${cur.lastDir ?? "—"}</div>`;
+    }
+  }
+  stateEl.innerHTML = kv;
+
+  // Step description
+  let desc = "";
+  if (!tr.clipped) {
+    desc = "The segment is entirely outside the view box's clip region — process_line_segment returns immediately.";
+  } else if (state.cursor === 0) {
+    desc = "Initial state. The segment has been clipped to the view box; the algorithm computes from_tile, to_tile, step, t_delta, and the first axis crossings (t_max). Click Step to begin walking tiles.";
+  } else if (cur) {
+    const parts = [];
+    parts.push(`Iter ${cur.iter}: in tile ${fmtI(cur.tileCoords)}.`);
+    parts.push(`Compared t_max.x vs t_max.y → step in ${cur.dir}.`);
+    if (cur.nextDir === null) parts.push("Reached destination tile, so no further step is taken.");
+    parts.push(`Emitted add_fill on the sub-segment ${fmt(cur.fillSeg.from)} → ${fmt(cur.fillSeg.to)}.`);
+    for (const aux of cur.auxFills) parts.push(`Auxiliary fill: ${aux.reason}.`);
+    for (const bd of cur.backdrops) parts.push(`adjust_alpha_tile_backdrop(${fmtI(bd.tile)}, ${bd.delta}) — ${bd.reason}.`);
+    desc = parts.join(" ");
+  }
+  descEl.textContent = desc;
+
+  // Log: setup messages + per-event messages up to the cursor
+  const lines = [...tr.log];
+  for (let i = 0; i < state.cursor && i < tr.events.length; i++) {
+    const e = tr.events[i];
+    lines.push(`#${e.iter} tile=${fmtI(e.tileCoords)} dir=${e.dir}${e.nextDir === null ? "(end)" : ""} ` +
+               `t_max=${fmt(e.tMax)} fill=${fmt(e.fillSeg.from)}→${fmt(e.fillSeg.to)}`);
+    for (const aux of e.auxFills) lines.push(`   aux: ${aux.reason}, ${fmt(aux.from)}→${fmt(aux.to)}`);
+    for (const bd of e.backdrops) lines.push(`   backdrop ${bd.delta > 0 ? "+1" : "−1"} on tile ${fmtI(bd.tile)} (${bd.reason})`);
+  }
+  logEl.textContent = lines.join("\n");
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+/* ---------- Stepping ---------- */
+function step() {
+  if (!state.trace) return;
+  if (state.cursor < state.trace.events.length) {
+    state.cursor++;
+    updateUI(); render();
+  } else {
+    pause();
+  }
+}
+function back() {
+  if (state.cursor > 0) {
+    state.cursor--;
+    updateUI(); render();
+  }
+}
+function reset() { state.cursor = 0; updateUI(); render(); }
+
+let playTimer = null;
+function play() {
+  if (state.playing) return;
+  state.playing = true; $("play").textContent = "Pause ⏸";
+  const tick = () => {
+    step();
+    if (state.playing) playTimer = setTimeout(tick, +inputs.speed.value);
+  };
+  tick();
+}
+function pause() {
+  state.playing = false; $("play").textContent = "Play ⏵";
+  if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+}
+function togglePlay() { state.playing ? pause() : play(); }
+
+$("step").onclick = step;
+$("back").onclick = back;
+$("reset").onclick = reset;
+$("play").onclick = togglePlay;
+
+$("rand").onclick = () => {
+  const W = state.vbTilesW * state.tileSize, H = state.vbTilesH * state.tileSize;
+  // Sometimes generate a segment that goes above y=0 to exercise the
+  // top-boundary auxiliary-fill paths.
+  const goAbove = Math.random() < 0.4;
+  state.from = v2(Math.random() * W, Math.random() * H);
+  state.to   = v2(Math.random() * W, goAbove ? -Math.random() * H * 0.6 : Math.random() * H);
+  reset(); rebuildTrace();
+};
+$("preset1").onclick = () => { state.from = v2(40, 60); state.to = v2(580, 380); reset(); rebuildTrace(); };
+$("preset2").onclick = () => {
+  // ↗ up-right that exits through the top boundary, exercising auxiliary fills.
+  state.from = v2(40, 380); state.to = v2(600, -120); reset(); rebuildTrace();
+};
+$("preset3").onclick = () => {
+  // Forces a clip on the left edge: starts to the left of view box and ends inside.
+  state.from = v2(-120, 200); state.to = v2(420, 280);
+  reset(); rebuildTrace();
+};
+
+for (const k of ["ax","ay","bx","by"]) {
+  inputs[k].addEventListener("change", () => {
+    state.from = v2(+inputs.ax.value, +inputs.ay.value);
+    state.to   = v2(+inputs.bx.value, +inputs.by.value);
+    reset(); rebuildTrace();
+  });
+}
+inputs.tile.addEventListener("change", () => {
+  const v = Math.max(8, Math.min(64, +inputs.tile.value || 32));
+  state.tileSize = v; reset(); rebuildTrace();
+});
+inputs.vbW.addEventListener("change", () => { state.vbTilesW = Math.max(1, +inputs.vbW.value); reset(); rebuildTrace(); });
+inputs.vbH.addEventListener("change", () => { state.vbTilesH = Math.max(1, +inputs.vbH.value); reset(); rebuildTrace(); });
+
+/* ---------- Drag endpoints ---------- */
+function nearest(p) {
+  const A = w2c(state.from), B = w2c(state.to);
+  const dA = Math.hypot(A.x - p.x, A.y - p.y);
+  const dB = Math.hypot(B.x - p.x, B.y - p.y);
+  if (Math.min(dA, dB) > 14) return null;
+  return dA < dB ? "a" : "b";
+}
+cv.addEventListener("mousedown", (e) => {
+  const r = cv.getBoundingClientRect();
+  const p = { x: e.clientX - r.left, y: e.clientY - r.top };
+  state.drag = nearest(p);
+});
+cv.addEventListener("mousemove", (e) => {
+  if (!state.drag) return;
+  const r = cv.getBoundingClientRect();
+  const p = { x: e.clientX - r.left, y: e.clientY - r.top };
+  const w = c2w(p);
+  if (state.drag === "a") state.from = w; else state.to = w;
+  rebuildTrace();
+});
+window.addEventListener("mouseup", () => { state.drag = null; });
+
+/* ---------- Init ---------- */
+fitCanvas();
+rebuildTrace();
+</script>
+</body>
+</html>

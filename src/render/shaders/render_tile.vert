@@ -61,7 +61,7 @@ void main() {
     }
 
     float depth = 1.0 - (float(a_misc.z) / 10000.0) * 2.0;
-    gl_Position = vec4(ndc, depth, 1.0);
+    gl_Position = vec4(ndc, 0.0, 1.0);
 
     v_backdrop = a_backdrop;
     v_segment  = a_segment;  // x = offset (from f32::from_bits), y = count

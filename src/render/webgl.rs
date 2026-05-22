@@ -393,8 +393,9 @@ impl WebGlRenderer {
         // Draw instanced
         self.gl.bind_vertex_array(Some(&self.programs.resources.tile_vao));
 
-        self.gl.disable(WebGl2RenderingContext::DEPTH_TEST);
-        self.gl.depth_mask(false);
+        self.gl.enable(WebGl2RenderingContext::DEPTH_TEST);
+self.gl.depth_func(WebGl2RenderingContext::LESS);
+self.gl.depth_mask(true);
         self.gl.enable(WebGl2RenderingContext::BLEND);
         self.gl.blend_func(
             WebGl2RenderingContext::SRC_ALPHA,

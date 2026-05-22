@@ -190,7 +190,7 @@ async fn test_renders_tiger_svg() {
     let svg_str = include_str!("../assets/Ghostscript_Tiger.svg");
     let pico_svg = PicoSvg::load(svg_str, 1.0).expect("Failed to parse SVG");
 
-    let scale = 1.0_f32;
+    let scale = 8.0_f32;
     let base_transform = Transform2D::new(
         scale, 0.0,
         0.0, -scale,

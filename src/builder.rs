@@ -48,6 +48,7 @@ pub(crate) struct Builder {
     /// Cached bounding box for the current shape.
     pub(crate) bbox: Box2D<f32>,
     pub(crate) level: Level,
+     pub(crate) shape_index: u32,
 }
 
 impl Builder {
@@ -75,6 +76,7 @@ impl Builder {
             covers: RefCell::new(CoverStorage::new()),
             bbox: Box2D::new(Point2D::new(0.0, 0.0), Point2D::new(0.0, 0.0)),
             level,
+             shape_index: 0,
         }
     }
 
@@ -204,6 +206,8 @@ impl Builder {
                         (acc[0] as i32) | ((acc[1] as i32) << 16),
                         (acc[2] as i32) | ((acc[3] as i32) << 16),
                     ];
+                     let current_depth = self.shape_index;
+                    self.shape_index += 1;
 
                     self.tiles.push(Tile {
                         x: global_x,
@@ -218,7 +222,7 @@ impl Builder {
                         ],
                         payload: payload,
                         paint_and_rect_flag: final_paint_flag,
-                        depth_index: 0,
+                        depth_index: current_depth,
                     });
                 }
 

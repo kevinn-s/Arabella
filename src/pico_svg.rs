@@ -23,6 +23,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::str::FromStr;
 use roxmltree::{Document, Node};
+
 use std::eprintln;
 
 /// A simplified representation of an SVG document

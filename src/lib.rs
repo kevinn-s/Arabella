@@ -7,12 +7,16 @@ mod render;
 mod paint;
 mod path;
 mod pico_svg;  
-pub use render::{Config, Tile, RenderSize};
+mod flatten;
+mod tile;
+mod builder;
+mod blocks;
+pub use render::{Config, RenderSize};
 #[cfg(all(target_arch = "wasm32", feature = "webgl"))]
 pub use render::webgl::WebGlRenderer;
 pub use scene::{Scene};
 pub use pico_svg::{PicoSvg, FillItem, Item, GroupItem, StrokeItem};
-
+pub use paint::IndexedPaint;
 
 use thiserror::Error;
 
@@ -29,3 +33,9 @@ pub enum RenderError {
     SlotsExhausted,
 
 }
+
+const COLOR_SOURCE_SHIFT: u32 = 30;
+
+pub const TILE_WIDTH: f32 = 4.0;
+pub const TILE_HEIGHT: f32 = 4.0;
+

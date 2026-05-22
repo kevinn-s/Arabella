@@ -31,28 +31,28 @@ pub struct RenderSize {
     pub height: u32,
 }
 
-#[repr(C, align(16))]  
-#[derive(Debug, Copy, Clone, Pod, Zeroable)]  
-pub struct Config {  
-    pub width: u32,  
-    pub height: u32,  
-    pub tile_height: u32,        // Renamed from strip_height  
-    pub segments_tex_width_bits: u32,  // For your segment texture  
-    pub encoded_paints_tex_width_bits: u32,  
-    pub negate_ndc: u32, 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct Config {
+    pub width: u32,
+    pub height: u32,
+    pub tile_height: u32,
+    pub segments_tex_width_bits: u32,
+    pub segment_list_tex_width_bits: u32,
+    pub encoded_paints_tex_width_bits: u32,
+    pub negate_ndc: u32,
     pub _pad0: u32,
-    pub _pad1: u32, 
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Zeroable, Pod)]
+
+
 pub struct Tile {
     pub x: u16,
     pub y: u16,
     pub width: u8,
     pub height: u8, 
     pub _pad: [u8; 2], 
-    pub backdrop: [u32;2],
+    pub backdrop: u32,
     pub segment: [u32;2],
     pub payload: u32,
     pub paint_and_rect_flag: u32,
@@ -66,7 +66,7 @@ impl Tile {
 
     /// The height of a tile in pixels.
     pub const HEIGHT: u16 = 4;
-      pub const PIXEL_ROWS: usize = 4;
+    pub const PIXEL_ROWS: usize = 4;
 }
 /// Different types of GPU encoded paints.
 #[derive(Debug)]

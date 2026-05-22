@@ -1,23 +1,14 @@
 #version 300 es
 precision highp float;
 precision highp int;
-
-// ============================================================================
-// Constants — must match Rust side
-// ============================================================================
+precision highp usampler2D;
 
 #define TILE_WIDTH  4u
 #define TILE_HEIGHT 4u
-#define TILE_PIXEL_ROWS 4
 
 #define COLOR_SOURCE_PAYLOAD 0u
 #define COLOR_SOURCE_PAINT   1u
-
-#define PAINT_TYPE_SOLID            0u
-#define PAINT_TYPE_LINEAR_GRADIENT  1u
-#define PAINT_TYPE_RADIAL_GRADIENT  2u
-#define PAINT_TYPE_SWEEP_GRADIENT   3u
-#define PAINT_TYPE_IMAGE            4u
+#define PAINT_TYPE_SOLID     0u
 
 #define COLOR_SOURCE_SHIFT 30u
 #define PAINT_TYPE_SHIFT   27u
@@ -25,7 +16,6 @@ precision highp int;
 #define COLOR_SOURCE_MASK  0xC0000000u
 #define PAINT_TYPE_MASK    0x38000000u
 #define FILL_RULE_MASK     0x07000000u
-#define PAINT_INDEX_MASK   0x00FFFFFFu
 
 #define FILL_RULE_NONZERO 0u
 #define FILL_RULE_EVENODD 1u
@@ -39,25 +29,31 @@ layout(std140) uniform config {
     uint u_height;
     uint u_tile_height;
     uint u_segments_tex_width_bits;
+    uint u_segment_list_tex_width_bits;
     uint u_encoded_paints_tex_width_bits;
     uint u_negate_ndc;
     uint _pad0;
-    uint _pad1;
 };
 
-uniform sampler2D segments_texture;
+// Texture 0: curve control points (RGBA32F)
+// Each texel = [from.x, from.y, ctrl.x, ctrl.y] or [to.x, to.y, 0, 0]
+// 2 texels per segment: texel0 = (from, ctrl), texel1 = (to, 0)
+uniform sampler2D u_segments_texture;
+
+// Texture 1: per-tile segment index list (R32UI)
+// Linear array of u32 curve indices
+uniform usampler2D u_segment_list_texture;
 
 // ============================================================================
 // Varyings from vertex shader
 // ============================================================================
 
-flat in uvec2 v_backdrop;
-flat in uvec2 v_segment;
+flat in ivec2 v_backdrop;
+flat in uvec2 v_segment;           // x = offset, y = count
 flat in uint  v_payload;
 flat in uint  v_paint_flag;
 flat in uvec2 v_tile_origin_pixels;
-// Add this line to your Fragment Shader
-flat in uint v_depth_index;
+flat in uint  v_depth_index;
 in vec2 v_local_xy;
 
 out vec4 fragColor;
@@ -66,71 +62,63 @@ out vec4 fragColor;
 // Helpers
 // ============================================================================
 
-int unpack_i16(uint word, uint half_idx) {
-    uint shifted = (word >> (half_idx * 16u)) & 0xFFFFu;
-    if ((shifted & 0x8000u) != 0u) {
-        return int(shifted | 0xFFFF0000u);
-    } else {
-        return int(shifted);
+/// Unpack i16 from packed i32 (two i16s per i32)
+int unpack_i16(int word, int half_idx) {
+    int shifted = (word >> (half_idx * 16)) & 0xFFFF;
+    // Sign extend
+    if ((shifted & 0x8000) != 0) {
+        shifted |= ~0xFFFF;
     }
+    return shifted;
 }
 
-int get_backdrop(uvec2 backdrop, int pixel_row) {
-    uint word = (pixel_row < 2) ? backdrop.x : backdrop.y;
-    uint half_idx = uint(pixel_row & 1);
+/// Get backdrop winding for a pixel row (0-3) within the tile
+int get_row_backdrop(int local_y) {
+    int word = (local_y < 2) ? v_backdrop.x : v_backdrop.y;
+    int half_idx = local_y & 1;
     return unpack_i16(word, half_idx);
 }
 
-
-int get_row_backdrop(int local_y) {
-    uint b = (local_y < 2) ? v_backdrop.x : v_backdrop.y;
-    uint shift = ((local_y & 1) == 0) ? 0u : 16u;
-    int winding = int((b >> shift) & 0xFFFFu);
-    if ((winding & 0x8000) != 0) {
-        winding |= ~0xFFFF;
-    }
-    return winding;
+/// Convert linear index to 2D texture coordinate
+ivec2 segments_idx_to_coord(uint idx) {
+    return ivec2(
+        int(idx & ((1u << u_segments_tex_width_bits) - 1u)),
+        int(idx >> u_segments_tex_width_bits)
+    );
 }
 
-vec4 fetch_segment_data(uint index) {
-    uint tex_width = 1u << u_segments_tex_width_bits;
-    uint tex_x = index & (tex_width - 1u);
-    uint tex_y = index >> u_segments_tex_width_bits;
-    return texelFetch(segments_texture, ivec2(tex_x, tex_y), 0);
+ivec2 segment_list_idx_to_coord(uint idx) {
+    return ivec2(
+        int(idx & ((1u << u_segment_list_tex_width_bits) - 1u)),
+        int(idx >> u_segment_list_tex_width_bits)
+    );
 }
 
-void read_segment(uint seg_offset, out vec2 p0, out vec2 p1, out vec2 p2) {
-    uint base_texel = seg_offset * 2u;
-    uint tex_width = uint(textureSize(segments_texture, 0).x);
+/// Fetch a curve index from the segment list texture
+uint get_curve_index(uint list_offset, uint i) {
+    uint idx = list_offset + i;
+    return texelFetch(u_segment_list_texture, segment_list_idx_to_coord(idx), 0).r;
+}
 
-    uint t0_x = base_texel & (tex_width - 1u);
-    uint t0_y = base_texel >> u_segments_tex_width_bits;
-    uint t1_idx = base_texel + 1u;
-    uint t1_x = t1_idx & (tex_width - 1u);
-    uint t1_y = t1_idx >> u_segments_tex_width_bits;
-
-    vec4 texel0 = texelFetch(segments_texture, ivec2(int(t0_x), int(t0_y)), 0);
-    vec4 texel1 = texelFetch(segments_texture, ivec2(int(t1_x), int(t1_y)), 0);
-
-    p0 = texel0.xy;
-    p1 = texel0.zw;
-    p2 = texel1.xy;
+/// Read curve control points from segments texture
+/// Each curve occupies 2 RGBA32F texels:
+///   texel 0: (from.x, from.y, ctrl.x, ctrl.y)
+///   texel 1: (to.x, to.y, 0, 0)
+void read_curve(uint curve_idx, out vec2 p0, out vec2 p1, out vec2 p2) {
+    uint base_texel = curve_idx * 2u;
+    vec4 texel0 = texelFetch(u_segments_texture, segments_idx_to_coord(base_texel), 0);
+    vec4 texel1 = texelFetch(u_segments_texture, segments_idx_to_coord(base_texel + 1u), 0);
+    p0 = texel0.xy;  // from
+    p1 = texel0.zw;  // ctrl
+    p2 = texel1.xy;  // to
 }
 
 // ============================================================================
-// Extended Implicit Geometry (Loop-Blinn) Evaluation
+// Loop-Blinn Implicit Curve Evaluation
 // ============================================================================
-//
-// We replace the quadratic raycast with purely algebraic implicit function 
-// testing. By finding the barycentric coordinates of the pixel and checking 
-// the sign of (U^2 - V), we can flawlessly determine if the pixel is to the 
-// right or left of the curve without any square roots.
 
-// ============================================================================
-// Extended Implicit Geometry (Strict Bounding)
-// ============================================================================
 float quad_implicit_contribution(vec2 p0, vec2 p1, vec2 p2, vec2 pixel) {
-    // --- 1. Direction of traversal ---
+    // Direction of traversal
     float y_min, y_max, sign_v;
     if (p2.y > p0.y) {
         sign_v = 1.0; y_min = p0.y; y_max = p2.y;
@@ -140,58 +128,50 @@ float quad_implicit_contribution(vec2 p0, vec2 p1, vec2 p2, vec2 pixel) {
         return 0.0;
     }
 
-    // --- 2. Y-bounds (half-open to avoid double counting at segment joins) ---
+    // Y-bounds (half-open interval)
     if (pixel.y < y_min || pixel.y >= y_max) {
         return 0.0;
     }
 
-    // --- 3. Compute x on chord and on active control leg at pixel.y ---
+    // X on chord at pixel.y
     float t_chord = (pixel.y - p0.y) / (p2.y - p0.y);
     float x_chord = p0.x + t_chord * (p2.x - p0.x);
 
+    // X on active control leg at pixel.y
     float x_leg;
     bool on_first_leg = (sign_v > 0.0) ? (pixel.y < p1.y) : (pixel.y > p1.y);
 
     if (on_first_leg) {
-        // Active leg: P0 → P1
-        float t_leg = (pixel.y - p0.y) / (p1.y - p0.y);
-        x_leg = p0.x + t_leg * (p1.x - p0.x);
+        float denom = p1.y - p0.y;
+        if (abs(denom) < 1e-6) {
+            x_leg = p0.x;
+        } else {
+            float t_leg = (pixel.y - p0.y) / denom;
+            x_leg = p0.x + t_leg * (p1.x - p0.x);
+        }
     } else {
-        // Active leg: P1 → P2
-        if (abs(p2.y - p1.y) < 1e-6) {
+        float denom = p2.y - p1.y;
+        if (abs(denom) < 1e-6) {
             x_leg = p2.x;
         } else {
-            float t_leg = (pixel.y - p1.y) / (p2.y - p1.y);
+            float t_leg = (pixel.y - p1.y) / denom;
             x_leg = p1.x + t_leg * (p2.x - p1.x);
         }
     }
 
-    // --- 4. Strict triangle bounds: handle T2 ∪ T3 region ---
+    // Strict triangle bounds
     float x_min_tri = min(x_chord, x_leg);
     float x_max_tri = max(x_chord, x_leg);
 
     if (pixel.x > x_max_tri) {
-        return sign_v; // in T2 ∪ T3 → inside
+        return sign_v;
     } else if (pixel.x < x_min_tri) {
-        return 0.0;    // left of entire control triangle → outside
+        return 0.0;
     }
 
-    // --- 5. Inside T1: implicit Loop-Blinn test ---
-    // Loop-Blinn texture coordinates:
-    //   u = 0.5 * w1 + w2
-    //   v = w2
-    //   f(u, v) = u² - v
-    //
-    // P0 → (u=0, v=0) → f = 0    (on curve)
-    // P1 → (u=0.5, v=0) → f = 0.25 (P1 is on the f > 0 side = bulge side)
-    // P2 → (u=1, v=1) → f = 0    (on curve)
-    //
-    // f > 0 ⟺ pixel is on the BULGE side (P1 side) of the curve
-    // f < 0 ⟺ pixel is on the CHORD side (wedge side) of the curve
-
+    // Inside control triangle: Loop-Blinn implicit test
     float denom = (p1.y - p2.y) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.y - p2.y);
     if (abs(denom) < 1e-6) {
-        // Degenerate triangle — treat as line, default to chord comparison
         return (pixel.x > x_chord) ? sign_v : 0.0;
     }
 
@@ -204,24 +184,17 @@ float quad_implicit_contribution(vec2 p0, vec2 p1, vec2 p2, vec2 pixel) {
     float v = w2;
     float f = u * u - v;
 
-    if (abs(f) < 0.0001) {
-    return (pixel.x > x_chord) ? sign_v : 0.0;
-}
-
-    // --- 6. Choose the correct half of T1 based on bulge direction ---
     bool bulges_right = x_leg > x_chord;
 
     if (bulges_right) {
-        // Right-bulge: WEDGE half (chord side, f < 0) is inside.
         return (f > 0.0) ? sign_v : 0.0;
     } else {
-        // Left-bulge: BULGE-CHORD WEDGE (P1 side, f > 0) is inside.
         return (f < 0.0) ? sign_v : 0.0;
     }
 }
 
 // ============================================================================
-// Paint resolution
+// Paint
 // ============================================================================
 
 vec4 unpack_rgba8(uint packed) {
@@ -232,81 +205,54 @@ vec4 unpack_rgba8(uint packed) {
     return vec4(r, g, b, a);
 }
 
-vec4 resolve_paint() {
-    uint source = (v_paint_flag & COLOR_SOURCE_MASK) >> COLOR_SOURCE_SHIFT;
-    uint paint_type = (v_paint_flag & PAINT_TYPE_MASK) >> PAINT_TYPE_SHIFT;
-
-    if (source == COLOR_SOURCE_PAYLOAD && paint_type == PAINT_TYPE_SOLID) {
-        return unpack_rgba8(v_payload);
-    }
-
-    return vec4(1.0, 0.0, 1.0, 1.0);
-}
-
 // ============================================================================
 // Main
 // ============================================================================
+
 void main() {
     uint fill_rule = (v_paint_flag & FILL_RULE_MASK) >> FILL_RULE_SHIFT;
-    uint seg_count  = v_segment.x;
-    uint seg_offset = v_segment.y;
+    uint seg_offset = v_segment.x;
+    uint seg_count  = v_segment.y;
 
-    int local_y = int(v_local_xy.y - float(v_tile_origin_pixels.y));
-    local_y = clamp(local_y, 0, 3);
-    int row_winding_start = get_row_backdrop(local_y);
+    // Pixel row within tile (0-3)
+    int local_y = clamp(int(v_local_xy.y) - int(v_tile_origin_pixels.y), 0, 3);
 
-    float coverage = 0.0;
+    // Start with backdrop winding for this row
+    float winding = float(get_row_backdrop(local_y));
 
-    // 4x4 Supersampling
-    for (int sx = 0; sx < 4; sx++) {
-        for (int sy = 0; sy < 4; sy++) {
-            vec2 subpixel_offset = (vec2(float(sx), float(sy)) + 0.5) * 0.25 - 0.5;
-            vec2 sample_pos = v_local_xy + subpixel_offset;
-            
-            float sample_winding = float(row_winding_start) / 256.0;;
+    // Pixel center
+    vec2 pixel_center = v_local_xy + vec2(0.5);
 
-            // Accumulate ALL segments for this sub-sample
-            for (uint s = 0u; s < seg_count; s++) {
-                uint tex_base = (seg_offset + s) * 2u;
-                vec4 tex0 = fetch_segment_data(tex_base);
-                vec4 tex1 = fetch_segment_data(tex_base + 1u);
-                sample_winding += quad_implicit_contribution(tex0.xy, tex0.zw, tex1.xy, sample_pos);
-            }
+    // Accumulate winding from all curves in this tile
+    for (uint s = 0u; s < seg_count; s++) {
+        // Look up which curve this tile references
+        uint curve_idx = get_curve_index(seg_offset, s);
 
-            // Apply Fill Rule
-            bool filled = false;
-            if (fill_rule == FILL_RULE_NONZERO) {
-                filled = abs(sample_winding) > 0.1;
-            } else {
-                filled = (int(abs(round(sample_winding))) % 2) != 0;
-            }
+        // Fetch curve control points
+        vec2 p0, p1, p2;
+        read_curve(curve_idx, p0, p1, p2);
 
-            if (filled) coverage += 1.0;
-        }
+        // Evaluate Loop-Blinn implicit
+        winding += quad_implicit_contribution(p0, p1, p2, pixel_center);
     }
 
-    coverage /= 16.0;
+    // Apply fill rule
+    float coverage;
+    if (fill_rule == FILL_RULE_NONZERO) {
+        coverage = clamp(abs(winding), 0.0, 1.0);
+    } else {
+        // Even-odd
+        coverage = abs(mod(winding, 2.0));
+        if (coverage > 1.0) coverage = 2.0 - coverage;
+    }
 
-    if (coverage < 0.001) {
+    if (coverage < 0.004) {
         discard;
     }
 
-// if (coverage > 0.0) {
-//     // Generate a pseudo-random color based on the depth index
-//     float h = float(v_depth_index) * 0.1; // Offset for the color wheel
-//     vec3 debug_color = vec3(
-//         abs(sin(h + 0.0)),
-//         abs(sin(h + 2.09)), // 120 degrees apart
-//         abs(sin(h + 4.18))  // 240 degrees apart
-//     );
-    
-//     fragColor = vec4(debug_color, 1.0);
-//     return;
-// }
-
-    // Resolve Paint (Simplified for Solid)
+    // Resolve paint (solid color from payload)
     vec4 paint = unpack_rgba8(v_payload);
-  
-    // Apply coverage as alpha (Assuming premultiplied or simple blend)
+
+    // Premultiplied alpha output
     fragColor = paint * coverage;
 }

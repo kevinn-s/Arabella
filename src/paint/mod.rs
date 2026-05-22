@@ -5,7 +5,11 @@ pub use encode::{
     RadialKind, FocalData, FromF32Color
 };
 mod simd;
-mod  math;
-mod  paint;
+mod math;
+
+pub(crate) mod paint;
+pub use paint::{IndexedPaint};
+
 mod pixmap;
+
 pub(crate) mod gradient_cache;

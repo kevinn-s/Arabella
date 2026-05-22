@@ -14,17 +14,27 @@ default-target = "x86_64-unknown-linux-gnu"
 targets = ["wasm32-unknown-unknown"]
 
 [dependencies]
-libm = { version = "0.2", optional = true }
-peniko = { version = "0.6.0" ,features = ["bytemuck"]}
-kurbo = { version = "0.13.0" }
-png = { version = "0.18.1", optional = true } 
 bytemuck = { version = "1.25.0", features = ["derive", "extern_crate_alloc"]}
-hashbrown = { version = "0.17.0" }
 fearless_simd = { version = "0.4.0"  }
+rayon = "1.11.0"
+png = { version = "0.18.1", optional = true } 
+hashbrown = { version = "0.17.0" }
 smallvec =  "1.15.1"
 thiserror = { version = "2.0.18" }
-log = { version = "0.4.29" }
+log = "0.4.29"
+wasm-bindgen-rayon = "=1.1.3"
+wasm-bindgen-futures = "0.4.71"
+lyon_path = "1.0.19"
+lyon_geom = "1.0.19"
+lyon_algorithms = "1.0.20"
+peniko = { version = "0.6.1", default-features = false, features = ["libm"] }
+kurbo = { version = "0.13.0" }
 roxmltree = { version = "0.20.0"}
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.50"
+console_error_panic_hook = "0.1"
+console_log = "1.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2", optional = true }
@@ -32,6 +42,7 @@ js-sys = { version = "0.3.91", optional = true }
 web-sys = { version = "0.3.91", features = [
     "HtmlCanvasElement",
     "Window",
+    "Performance",
     "Document",
     "Element",
     "HtmlElement",
@@ -53,24 +64,16 @@ web-sys = { version = "0.3.91", features = [
     "WebGlVertexArrayObject",
 ], optional = true }
 
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = { version = "1.11.0", optional = true }
 thread_local = { version = "1.1.9", optional = true }
 
-[dev-dependencies]
-wasm-bindgen-test = "0.3.50"
-console_error_panic_hook = "0.1"
-console_log = "1.0"
 
 [features]
-webgl = ["dep:js-sys", "dep:web-sys", "dep:wasm-bindgen"]
 default = ["std", "png"]
-# Get floating point functions from the standard library (likely using your target's libc).
-std = ["peniko/std", "fearless_simd/std"]
-# Use floating point implementations from libm.
-libm = ["peniko/libm", "dep:libm", "fearless_simd/libm"]
-# Allow loading Pixmap from PNG, and drawing png glyphs.
+std = ["fearless_simd/std"]
+webgl = ["dep:js-sys", "dep:web-sys", "dep:wasm-bindgen"]
 png = ["std", "dep:png"]
-# Enable multi-threaded rendering.
 multithreading = ["std", "dep:rayon", "dep:thread_local"]
-# Development only features
+

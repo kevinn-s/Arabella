@@ -195,94 +195,94 @@ impl Pixmap {
     }
 
     /// Create a pixmap from a PNG file.
-    #[cfg(feature = "png")]
-    pub fn from_png(data: impl BufRead + Seek) -> Result<Self, png::DecodingError> {
-        let mut decoder = png::Decoder::new(data);
-        decoder.set_transformations(
-            png::Transformations::normalize_to_color8() | png::Transformations::ALPHA,
-        );
+    // #[cfg(feature = "png")]
+    // pub fn from_png(data: impl BufRead + Seek) -> Result<Self, png::DecodingError> {
+    //     let mut decoder = png::Decoder::new(data);
+    //     decoder.set_transformations(
+    //         png::Transformations::normalize_to_color8() | png::Transformations::ALPHA,
+    //     );
 
-        let mut reader = decoder.read_info()?;
-        let mut pixmap = {
-            let info = reader.info();
-            let width: u16 = info
-                .width
-                .try_into()
-                .map_err(|_| png::DecodingError::LimitsExceeded)?;
-            let height: u16 = info
-                .height
-                .try_into()
-                .map_err(|_| png::DecodingError::LimitsExceeded)?;
-            Self::new(width, height)
-        };
+    //     let mut reader = decoder.read_info()?;
+    //     let mut pixmap = {
+    //         let info = reader.info();
+    //         let width: u16 = info
+    //             .width
+    //             .try_into()
+    //             .map_err(|_| png::DecodingError::LimitsExceeded)?;
+    //         let height: u16 = info
+    //             .height
+    //             .try_into()
+    //             .map_err(|_| png::DecodingError::LimitsExceeded)?;
+    //         Self::new(width, height)
+    //     };
 
-        // Note `reader.info()` returns the pre-transformation color type output, whereas
-        // `reader.output_color_type()` takes the transformation into account.
-        let (color_type, bit_depth) = reader.output_color_type();
-        debug_assert_eq!(
-            bit_depth,
-            png::BitDepth::Eight,
-            "normalize_to_color8 means the bit depth is always 8."
-        );
+    //     // Note `reader.info()` returns the pre-transformation color type output, whereas
+    //     // `reader.output_color_type()` takes the transformation into account.
+    //     let (color_type, bit_depth) = reader.output_color_type();
+    //     debug_assert_eq!(
+    //         bit_depth,
+    //         png::BitDepth::Eight,
+    //         "normalize_to_color8 means the bit depth is always 8."
+    //     );
 
-        match color_type {
-            png::ColorType::Rgb | png::ColorType::Grayscale => {
-                unreachable!("We set a transformation to always convert to alpha")
-            }
-            png::ColorType::Indexed => {
-                unreachable!("Transformation should have expanded indexed images")
-            }
-            png::ColorType::Rgba => {
-                debug_assert_eq!(
-                    Some(pixmap.data_as_u8_slice().len()),
-                    reader.output_buffer_size(),
-                    "The pixmap buffer should have the same number of bytes as the image."
-                );
-                reader.next_frame(pixmap.data_as_u8_slice_mut())?;
-            }
-            png::ColorType::GrayscaleAlpha => {
-                debug_assert_eq!(
-                    Some(pixmap.data().len() * 2),
-                    reader.output_buffer_size(),
-                    "The pixmap buffer should have twice the number of bytes of the grayscale image."
-                );
-                let mut grayscale_data = vec![0; reader.output_buffer_size().unwrap_or_default()];
-                reader.next_frame(&mut grayscale_data)?;
+    //     match color_type {
+    //         png::ColorType::Rgb | png::ColorType::Grayscale => {
+    //             unreachable!("We set a transformation to always convert to alpha")
+    //         }
+    //         png::ColorType::Indexed => {
+    //             unreachable!("Transformation should have expanded indexed images")
+    //         }
+    //         png::ColorType::Rgba => {
+    //             debug_assert_eq!(
+    //                 Some(pixmap.data_as_u8_slice().len()),
+    //                 reader.output_buffer_size(),
+    //                 "The pixmap buffer should have the same number of bytes as the image."
+    //             );
+    //             reader.next_frame(pixmap.data_as_u8_slice_mut())?;
+    //         }
+    //         png::ColorType::GrayscaleAlpha => {
+    //             debug_assert_eq!(
+    //                 Some(pixmap.data().len() * 2),
+    //                 reader.output_buffer_size(),
+    //                 "The pixmap buffer should have twice the number of bytes of the grayscale image."
+    //             );
+    //             let mut grayscale_data = vec![0; reader.output_buffer_size().unwrap_or_default()];
+    //             reader.next_frame(&mut grayscale_data)?;
 
-                for (grayscale_pixel, pixmap_pixel) in
-                    grayscale_data.chunks_exact(2).zip(pixmap.data_mut())
-                {
-                    let [gray, alpha] = grayscale_pixel.try_into().unwrap();
-                    *pixmap_pixel = PremulRgba8 {
-                        r: gray,
-                        g: gray,
-                        b: gray,
-                        a: alpha,
-                    };
-                }
-            }
-        };
+    //             for (grayscale_pixel, pixmap_pixel) in
+    //                 grayscale_data.chunks_exact(2).zip(pixmap.data_mut())
+    //             {
+    //                 let [gray, alpha] = grayscale_pixel.try_into().unwrap();
+    //                 *pixmap_pixel = PremulRgba8 {
+    //                     r: gray,
+    //                     g: gray,
+    //                     b: gray,
+    //                     a: alpha,
+    //                 };
+    //             }
+    //         }
+    //     };
 
-        let mut may_have_opacities = false;
-        for pixel in pixmap.data_mut() {
-            let alpha = pixel.a;
-            if alpha != 255 {
-                may_have_opacities = true;
-            }
-            let alpha_u16 = u16::from(alpha);
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "Overflow should be impossible."
-            )]
-            let premultiply = |e: u8| ((u16::from(e) * alpha_u16) / 255) as u8;
-            pixel.r = premultiply(pixel.r);
-            pixel.g = premultiply(pixel.g);
-            pixel.b = premultiply(pixel.b);
-        }
-        pixmap.may_have_opacities = may_have_opacities;
+    //     let mut may_have_opacities = false;
+    //     for pixel in pixmap.data_mut() {
+    //         let alpha = pixel.a;
+    //         if alpha != 255 {
+    //             may_have_opacities = true;
+    //         }
+    //         let alpha_u16 = u16::from(alpha);
+    //         #[expect(
+    //             clippy::cast_possible_truncation,
+    //             reason = "Overflow should be impossible."
+    //         )]
+    //         let premultiply = |e: u8| ((u16::from(e) * alpha_u16) / 255) as u8;
+    //         pixel.r = premultiply(pixel.r);
+    //         pixel.g = premultiply(pixel.g);
+    //         pixel.b = premultiply(pixel.b);
+    //     }
+    //     pixmap.may_have_opacities = may_have_opacities;
 
-        Ok(pixmap)
-    }
+    //     Ok(pixmap)
+    // }
 
     /// Return the current content of the pixmap as a PNG.
     #[cfg(feature = "png")]
@@ -318,17 +318,17 @@ impl Pixmap {
     ///
     /// The pixels are in row-major order. Each pixel consists of four bytes in the order
     /// `[r, g, b, a]`.
-    pub fn data_as_u8_slice(&self) -> &[u8] {
-        bytemuck::cast_slice(&self.buf)
+    pub fn data_as_u8_slice(&self) {
+        // bytemuck::cast_slice(&self.buf)
     }
 
     /// Returns a mutable reference to the underlying data as premultiplied RGBA8.
     ///
     /// The pixels are in row-major order. Each pixel consists of four bytes in the order
     /// `[r, g, b, a]`.
-    pub fn data_as_u8_slice_mut(&mut self) -> &mut [u8] {
-        bytemuck::cast_slice_mut(&mut self.buf)
-    }
+    // pub fn data_as_u8_slice_mut(&mut self) -> &mut [u8] {
+    //     bytemuck::cast_slice_mut(&mut self.buf)
+    // }
 
     /// Sample a pixel from the pixmap.
     ///

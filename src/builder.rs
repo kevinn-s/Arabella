@@ -1,5 +1,6 @@
 use alloc::vec;
 use alloc::vec::Vec;
+use peniko::Fill;
 use core::cell::RefCell;
 use fearless_simd::*;
 
@@ -154,7 +155,13 @@ impl Builder {
         }
     }
 
-    pub fn generate_tiles(&mut self, paint_index: u32, fill_rule: FillRule) {
+    pub fn generate_tiles(&mut self, paint_index: u32, fill_rule: Fill,   payload: u32,
+        paint_flag: u32) {
+             let fill_rule_word = match fill_rule {
+            Fill::NonZero => FILL_RULE_NONZERO,
+            Fill::EvenOdd => FILL_RULE_EVENODD,
+        };
+             let final_paint_flag = paint_flag | (fill_rule_word << 24);
         let covers = self.covers.borrow();
         let tile_bounds = TileBounds::from_box2d(&self.bbox);
 
@@ -166,8 +173,8 @@ impl Builder {
         self.blocks.sort_blocks();
 
         let fill_rule_flag = match fill_rule {
-            FillRule::NonZero => FILL_RULE_NONZERO,
-            FillRule::EvenOdd => FILL_RULE_EVENODD,
+            Fill::NonZero => FILL_RULE_NONZERO,
+            Fill::EvenOdd => FILL_RULE_EVENODD,
         };
         let packed_paint = (COLOR_SOURCE_PAINT << COLOR_SOURCE_SHIFT)
             | (PAINT_TYPE_SOLID << PAINT_TYPE_SHIFT)
@@ -209,8 +216,8 @@ impl Builder {
                             f32::from_bits(list_offset),
                             f32::from_bits(block_count as u32),
                         ],
-                        payload: 0,
-                        paint_and_rect_flag: packed_paint,
+                        payload: payload,
+                        paint_and_rect_flag: final_paint_flag,
                         depth_index: 0,
                     });
                 }

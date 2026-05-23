@@ -80,11 +80,11 @@ impl Scene {
             FillRule::EvenOdd => FILL_RULE_EVENODD,
         };
         let final_paint_flag = paint_flag | (fill_rule_word << FILL_RULE_SHIFT);
-        // Phase 1: Flatten + DDA binning → covers + blocks
+        // Phase 1: Analytical curve binning into tiles
         self.builder.build_path(path, fill_rule, transform);
 
-        // Phase 2: Propagate covers → emit Tile structs
-        self.builder.generate_tiles(paint_index, Fill::NonZero,   payload,
+        // Phase 2: Compute backdrops + emit Tile structs
+        self.builder.generate_tiles(paint_index, Fill::NonZero, payload,
         paint_flag);
     }
 

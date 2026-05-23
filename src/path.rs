@@ -1,4 +1,3 @@
-use crate::flatten::flatten_quadratic;
 use alloc::vec::Vec;
 use fearless_simd::*;
 use lyon_geom::{Box2D, Point, Transform};
@@ -11,18 +10,33 @@ pub(crate) const SQRT_TOL: f32 = 0.5;
 pub(crate) const TOL: f32 = SQRT_TOL * SQRT_TOL;
 
 // ============================================================================
-// Public entry point
+// Curve record: one quadratic bezier stored as 8 floats in `segments`.
+//
+// Layout per curve (8 floats = 2 RGBA32F texels on GPU):
+//   [p0.x, p0.y, p1.x, p1.y, p2.x, p2.y, 0.0, 0.0]
+//
+// Where p0 = start, p1 = control, p2 = end.
+//
+// Lines are stored as degenerate quadratics with p1 = midpoint(p0, p2).
+// No y-monotonization — the shader handles non-monotonic curves via
+// root-finding (GLLabel/Dobbie approach).
 // ============================================================================
 
+/// Process a path into quadratic bezier segments for GPU evaluation.
+///
+/// # Output
+/// - `segments`: flat array of f32, 8 floats per curve (p0, ctrl, p2, pad).
+///   curve_id = index / 8 (i.e. the Nth group of 8 floats is curve N).
+/// - `bbox`: bounding box of all control points (expanded).
+///
+/// No line_buf, no flattening, no y-monotonization.
 pub fn fill_impl<'a, S: Simd>(
     simd: S,
     path: Iter,
     affine: Transform<f32>,
     segments: &'a mut Vec<f32>,
-    line_buf: &'a mut Vec<i32>,
     bbox: &mut Box2D<f32>,
 ) {
-    let mut curve_id = (segments.len() / 8) as i32;
     let mut iter = path;
 
     let Some(first_el) = iter.next() else {
@@ -42,9 +56,9 @@ pub fn fill_impl<'a, S: Simd>(
         match event {
             PathEvent::Begin { at } => {
                 let at = affine.transform_point(at);
-                // Close previous subpath with a line if needed
+                // Close previous subpath
                 if last_pt != start_pt {
-                    emit_line(segments, line_buf, &mut curve_id, last_pt, start_pt);
+                    emit_line(segments, last_pt, start_pt);
                 }
                 start_pt = at;
                 last_pt = at;
@@ -53,7 +67,7 @@ pub fn fill_impl<'a, S: Simd>(
             PathEvent::Line { from: _, to } => {
                 let to = affine.transform_point(to);
                 if (to.x - last_pt.x).abs() > EPSILON || (to.y - last_pt.y).abs() > EPSILON {
-                    emit_line(segments, line_buf, &mut curve_id, last_pt, to);
+                    emit_line(segments, last_pt, to);
                     expand_bbox(bbox, to);
                     last_pt = to;
                 }
@@ -65,59 +79,9 @@ pub fn fill_impl<'a, S: Simd>(
                 expand_bbox(bbox, ctrl);
                 expand_bbox(bbox, to);
 
-                if let Some(t) = find_quadratic_extrema(last_pt.y, ctrl.y, to.y) {
-                    let ab = last_pt.lerp(ctrl, t);
-                    let bc = ctrl.lerp(to, t);
-                    let mid = ab.lerp(bc, t);
-                    expand_bbox(bbox, mid);
-
-                    // First half: from=last_pt, ctrl=ab, to=mid
-                    let first_curve_id = curve_id;
-                    curve_id += 1;
-                    segments.extend_from_slice(&[
-                        last_pt.x, last_pt.y, ab.x, ab.y, mid.x, mid.y, 0.0, 0.0,
-                    ]);
-
-                    // Second half: from=mid, ctrl=bc, to=to
-                    let second_curve_id = curve_id;
-                    curve_id += 1;
-                    segments.extend_from_slice(&[
-                        mid.x, mid.y, bc.x, bc.y, to.x, to.y, 0.0, 0.0,
-                    ]);
-
-                    flatten_quadratic(
-                        f32_to_f24dot8(last_pt.x), f32_to_f24dot8(last_pt.y),
-                        f32_to_f24dot8(ab.x), f32_to_f24dot8(ab.y),
-                        f32_to_f24dot8(mid.x), f32_to_f24dot8(mid.y),
-                        &mut |x0, y0, x1, y1| {
-                            line_buf.extend_from_slice(&[x0, y0, x1, y1, first_curve_id]);
-                        },
-                    );
-                    flatten_quadratic(
-                        f32_to_f24dot8(mid.x), f32_to_f24dot8(mid.y),
-                        f32_to_f24dot8(bc.x), f32_to_f24dot8(bc.y),
-                        f32_to_f24dot8(to.x), f32_to_f24dot8(to.y),
-                        &mut |x0, y0, x1, y1| {
-                            line_buf.extend_from_slice(&[x0, y0, x1, y1, second_curve_id]);
-                        },
-                    );
-                } else {
-                    // Single curve: from=last_pt, ctrl=ctrl, to=to
-                    let this_curve_id = curve_id;
-                    curve_id += 1;
-                    segments.extend_from_slice(&[
-                        last_pt.x, last_pt.y, ctrl.x, ctrl.y, to.x, to.y, 0.0, 0.0,
-                    ]);
-
-                    flatten_quadratic(
-                        f32_to_f24dot8(last_pt.x), f32_to_f24dot8(last_pt.y),
-                        f32_to_f24dot8(ctrl.x), f32_to_f24dot8(ctrl.y),
-                        f32_to_f24dot8(to.x), f32_to_f24dot8(to.y),
-                        &mut |x0, y0, x1, y1| {
-                            line_buf.extend_from_slice(&[x0, y0, x1, y1, this_curve_id]);
-                        },
-                    );
-                }
+                // Store the quadratic as-is. No y-monotonization.
+                // The shader's root-finding handles non-monotonic curves.
+                emit_quad(segments, last_pt, ctrl, to);
                 last_pt = to;
             }
             PathEvent::Cubic { from: _, ctrl1, ctrl2, to } => {
@@ -137,16 +101,14 @@ pub fn fill_impl<'a, S: Simd>(
                 let n = estimate_number_of_quadratic_curves(&lp, &c1, &c2, &tp, TOL);
                 let q = convert_cubics_to_quadratic_curves(simd, &lp, &c1, &c2, &tp, n);
 
-                let mut flat_from_x = f32_to_f24dot8(last_pt.x);
-                let mut flat_from_y = f32_to_f24dot8(last_pt.y);
-                let mut curve_from_x = last_pt.x;
-                let mut curve_from_y = last_pt.y;
-
-                // The output stream layout from convert_cubics_to_quadratic_curves:
+                // Output stream layout:
                 //   q[0], q[1] = first on-curve point (P0)
                 //   For each curve i (0..n):
                 //     q[2 + i*4 + 0], q[2 + i*4 + 1] = control point
-                //     q[2 + i*4 + 2], q[2 + i*4 + 3] = endpoint (= next curve's start)
+                //     q[2 + i*4 + 2], q[2 + i*4 + 3] = endpoint
+
+                let mut from_x = last_pt.x;
+                let mut from_y = last_pt.y;
 
                 for i in 0..n {
                     let ctrl_x = q[2 + i * 4];
@@ -154,84 +116,25 @@ pub fn fill_impl<'a, S: Simd>(
                     let end_x = q[2 + i * 4 + 2];
                     let end_y = q[2 + i * 4 + 3];
 
-                    if let Some(t) = find_quadratic_extrema(curve_from_y, ctrl_y, end_y) {
-                        let p0 = Point::new(curve_from_x, curve_from_y);
-                        let p1 = Point::new(ctrl_x, ctrl_y);
-                        let p2 = Point::new(end_x, end_y);
-                        let ab = p0.lerp(p1, t);
-                        let bc = p1.lerp(p2, t);
-                        let mid = ab.lerp(bc, t);
+                    // Expand bbox for the control point (endpoints already covered)
+                    expand_bbox(bbox, Point::new(ctrl_x, ctrl_y));
 
-                        // First half
-                        let first_curve_id = curve_id;
-                        curve_id += 1;
-                        segments.extend_from_slice(&[
-                            curve_from_x, curve_from_y, ab.x, ab.y, mid.x, mid.y, 0.0, 0.0,
-                        ]);
+                    // Emit quadratic directly — no y-monotonize, no flatten
+                    segments.extend_from_slice(&[
+                        from_x, from_y, ctrl_x, ctrl_y, end_x, end_y, 0.0, 0.0,
+                    ]);
 
-                        // Second half
-                        let second_curve_id = curve_id;
-                        curve_id += 1;
-                        segments.extend_from_slice(&[
-                            mid.x, mid.y, bc.x, bc.y, p2.x, p2.y, 0.0, 0.0,
-                        ]);
-
-                        let mid_fx = f32_to_f24dot8(mid.x);
-                        let mid_fy = f32_to_f24dot8(mid.y);
-
-                        flatten_quadratic(
-                            flat_from_x, flat_from_y,
-                            f32_to_f24dot8(ab.x), f32_to_f24dot8(ab.y),
-                            mid_fx, mid_fy,
-                            &mut |x0, y0, x1, y1| {
-                                line_buf.extend_from_slice(&[x0, y0, x1, y1, first_curve_id]);
-                            },
-                        );
-                        flatten_quadratic(
-                            mid_fx, mid_fy,
-                            f32_to_f24dot8(bc.x), f32_to_f24dot8(bc.y),
-                            f32_to_f24dot8(p2.x), f32_to_f24dot8(p2.y),
-                            &mut |x0, y0, x1, y1| {
-                                line_buf.extend_from_slice(&[x0, y0, x1, y1, second_curve_id]);
-                            },
-                        );
-
-                        flat_from_x = f32_to_f24dot8(p2.x);
-                        flat_from_y = f32_to_f24dot8(p2.y);
-                    } else {
-                        // Single curve
-                        let this_curve_id = curve_id;
-                        curve_id += 1;
-                        segments.extend_from_slice(&[
-                            curve_from_x, curve_from_y, ctrl_x, ctrl_y, end_x, end_y, 0.0, 0.0,
-                        ]);
-
-                        let end_fx = f32_to_f24dot8(end_x);
-                        let end_fy = f32_to_f24dot8(end_y);
-
-                        flatten_quadratic(
-                            flat_from_x, flat_from_y,
-                            f32_to_f24dot8(ctrl_x), f32_to_f24dot8(ctrl_y),
-                            end_fx, end_fy,
-                            &mut |x0, y0, x1, y1| {
-                                line_buf.extend_from_slice(&[x0, y0, x1, y1, this_curve_id]);
-                            },
-                        );
-
-                        flat_from_x = end_fx;
-                        flat_from_y = end_fy;
-                    }
-
-                    curve_from_x = end_x;
-                    curve_from_y = end_y;
+                    from_x = end_x;
+                    from_y = end_y;
                 }
+
                 last_pt = to;
             }
             PathEvent::End { last, first, close } => {
                 let last = affine.transform_point(last);
                 let first = affine.transform_point(first);
                 if close && last != first {
-                    emit_line(segments, line_buf, &mut curve_id, last, first);
+                    emit_line(segments, last, first);
                 }
             }
         }
@@ -239,7 +142,7 @@ pub fn fill_impl<'a, S: Simd>(
 
     // Close final subpath if needed
     if last_pt != start_pt {
-        emit_line(segments, line_buf, &mut curve_id, last_pt, start_pt);
+        emit_line(segments, last_pt, start_pt);
     }
 }
 
@@ -247,26 +150,18 @@ pub fn fill_impl<'a, S: Simd>(
 // Helpers
 // ============================================================================
 
-/// Emit a line segment as a degenerate quadratic (ctrl = midpoint).
-/// Pushes 8 floats to segments and 5 i32s to line_buf.
+/// Emit a line as a degenerate quadratic (ctrl = midpoint of endpoints).
 #[inline(always)]
-fn emit_line(
-    segments: &mut Vec<f32>,
-    line_buf: &mut Vec<i32>,
-    curve_id: &mut i32,
-    from: Point<f32>,
-    to: Point<f32>,
-) {
+fn emit_line(segments: &mut Vec<f32>, from: Point<f32>, to: Point<f32>) {
     let mid_x = (from.x + to.x) * 0.5;
     let mid_y = (from.y + to.y) * 0.5;
-    let id = *curve_id;
-    *curve_id += 1;
     segments.extend_from_slice(&[from.x, from.y, mid_x, mid_y, to.x, to.y, 0.0, 0.0]);
-    line_buf.extend_from_slice(&[
-        f32_to_f24dot8(from.x), f32_to_f24dot8(from.y),
-        f32_to_f24dot8(to.x), f32_to_f24dot8(to.y),
-        id,
-    ]);
+}
+
+/// Emit a quadratic bezier curve.
+#[inline(always)]
+fn emit_quad(segments: &mut Vec<f32>, from: Point<f32>, ctrl: Point<f32>, to: Point<f32>) {
+    segments.extend_from_slice(&[from.x, from.y, ctrl.x, ctrl.y, to.x, to.y, 0.0, 0.0]);
 }
 
 #[inline(always)]
@@ -277,13 +172,8 @@ fn expand_bbox(bbox: &mut Box2D<f32>, pt: Point<f32>) {
     bbox.max.y = bbox.max.y.max(pt.y);
 }
 
-#[inline(always)]
-fn f32_to_f24dot8(v: f32) -> i32 {
-    (v * 256.0 + 0.5) as i32
-}
-
 // ============================================================================
-// Cubic → Quadratic conversion helpers
+// Cubic → Quadratic conversion (kept from original — this is correct)
 // ============================================================================
 
 #[inline(always)]
@@ -409,10 +299,7 @@ fn convert_cubics_to_quadratic_curves<S: Simd>(
         }
     }
 
-    // Write continuous stream:
-    // [P0.x, P0.y, ctrl0.x, ctrl0.y, P1.x, P1.y, ctrl1.x, ctrl1.y, P2.x, P2.y, ...]
-    // Layout: first 2 floats = initial on-curve point
-    //         then for each curve: 4 floats = (ctrl.x, ctrl.y, endpoint.x, endpoint.y)
+    // Output stream: [P0.x, P0.y, ctrl0.x, ctrl0.y, end0.x, end0.y, ctrl1.x, ...]
     let mut out: [f32; 96] = [0.0; 96];
     let mut index = 0;
 
@@ -431,20 +318,4 @@ fn convert_cubics_to_quadratic_curves<S: Simd>(
     }
 
     out
-}
-
-fn find_quadratic_extrema(a: f32, b: f32, c: f32) -> Option<f32> {
-    let a_min_b = a - b;
-    let d = a_min_b - b + c;
-
-    if a_min_b == 0.0 || d == 0.0 {
-        return None;
-    }
-
-    let t = a_min_b / d;
-
-    if t <= 1e-12 || t >= (1.0 - 1e-12) {
-        return None;
-    }
-    Some(t)
 }

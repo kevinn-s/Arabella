@@ -4,7 +4,7 @@
 only break in edge cases, and some of them are also only related to conversions from f64 to f32."
 )]
 
-use crate::render::common::render_tile;
+use crate::render::common::{loop_blinn, render_tile};
 use crate::{
     RenderError, RenderSize,
     render::{Config},
@@ -29,6 +29,8 @@ use web_sys::{
 struct WebGlPrograms {
     tile_program: WebGlProgram,
     tile_uniforms: TileUniforms,
+    loop_blinn_program: WebGlProgram,
+    loop_blinn_uniforms: LoopBlinnUniforms,
     resources: WebGlResources,
 }
 
@@ -40,12 +42,23 @@ impl WebGlPrograms {
             render_tile::FRAGMENT_SOURCE,
         );
         let tile_uniforms = get_tile_uniforms(gl, &tile_program);
+
+        let loop_blinn_program = create_shader_program(
+            gl,
+            loop_blinn::VERTEX_SOURCE,
+            loop_blinn::FRAGMENT_SOURCE,
+        );
+        let loop_blinn_uniforms = get_loop_blinn_uniforms(gl, &loop_blinn_program);
+
         let resources = create_webgl_resources(gl);
         initialize_tile_vao(gl, &resources);
+        initialize_loop_blinn_vao(gl, &resources);
 
         Self {
             tile_program,
             tile_uniforms,
+            loop_blinn_program,
+            loop_blinn_uniforms,
             resources,
         }
     }
@@ -142,6 +155,9 @@ impl WebGlPrograms {
 struct WebGlResources {
     tile_vao: WebGlVertexArrayObject,
     tiles_buffer: WebGlBuffer,
+    /// Loop-Blinn instanced rendering VAO and buffer
+    loop_blinn_vao: WebGlVertexArrayObject,
+    loop_blinn_instance_buffer: WebGlBuffer,
     /// Texture 0: curve control points (RGBA32F)
     segments_texture: WebGlTexture,
     segments_texture_height: u32,
@@ -161,6 +177,10 @@ struct WebGlResources {
 fn create_webgl_resources(gl: &WebGl2RenderingContext) -> WebGlResources {
     let tile_vao = gl.create_vertex_array().unwrap();
     let tiles_buffer = gl.create_buffer().unwrap();
+
+    // Loop-Blinn resources
+    let loop_blinn_vao = gl.create_vertex_array().unwrap();
+    let loop_blinn_instance_buffer = gl.create_buffer().unwrap();
 
     // Texture 0: segments (RGBA32F, NEAREST)
     let segments_texture = gl.create_texture().unwrap();
@@ -208,6 +228,8 @@ fn create_webgl_resources(gl: &WebGl2RenderingContext) -> WebGlResources {
     WebGlResources {
         tile_vao,
         tiles_buffer,
+        loop_blinn_vao,
+        loop_blinn_instance_buffer,
         segments_texture,
         segments_texture_height: 1,
         segment_list_texture,
@@ -253,6 +275,46 @@ fn get_tile_uniforms(gl: &WebGl2RenderingContext, program: &WebGlProgram) -> Til
         encoded_paints_texture: gl.get_uniform_location(program, "u_encoded_paints_texture"),
         gradient_texture: gl.get_uniform_location(program, "u_gradient_texture"),
     }
+}
+
+// ============================================================================
+// LoopBlinnUniforms
+// ============================================================================
+
+#[derive(Debug)]
+struct LoopBlinnUniforms {
+    config_block_index: u32,
+    segments_texture: WebGlUniformLocation,
+}
+
+fn get_loop_blinn_uniforms(gl: &WebGl2RenderingContext, program: &WebGlProgram) -> LoopBlinnUniforms {
+    let config_block_index = gl.get_uniform_block_index(program, "config");
+    debug_assert_ne!(config_block_index, WebGl2RenderingContext::INVALID_INDEX);
+    gl.uniform_block_binding(program, config_block_index, 0);
+
+    LoopBlinnUniforms {
+        config_block_index,
+        segments_texture: gl.get_uniform_location(program, "u_segments_texture").unwrap(),
+    }
+}
+
+// ============================================================================
+// LoopBlinnInstance — per-instance data for the Loop-Blinn pass
+// ============================================================================
+
+/// One instance = one quadratic curve's control triangle.
+/// Layout: 4 × u32 = 16 bytes per instance.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+struct LoopBlinnInstance {
+    /// Index into the segments texture (curve_id)
+    curve_index: u32,
+    /// Packed RGBA8 color (same as tile payload)
+    payload: u32,
+    /// Paint flag with fill rule, color source, paint type
+    paint_flag: u32,
+    /// Depth index for ordering
+    depth_index: u32,
 }
 
 // ============================================================================
@@ -303,9 +365,13 @@ impl WebGlRenderer {
             WebGl2RenderingContext::COLOR_BUFFER_BIT | WebGl2RenderingContext::DEPTH_BUFFER_BIT,
         );
 
-        // Draw
+        // Pass 1: Draw tile quads (existing fill pass)
         self.gl.use_program(Some(&self.programs.tile_program));
         self.render_tiles(scene.tiles(), render_size);
+
+        // Pass 2: Draw Loop-Blinn control triangles (boundary refinement)
+        self.gl.use_program(Some(&self.programs.loop_blinn_program));
+        self.render_loop_blinn(scene, render_size);
     }
 
     fn render_tiles(&self, tiles: &[Tile], render_size: &RenderSize) {
@@ -411,6 +477,122 @@ self.gl.depth_mask(true);
 
         self.gl.bind_vertex_array(None);
     }
+
+    // ========================================================================
+    // Loop-Blinn instanced pass
+    // ========================================================================
+
+    /// Build instance data from the scene's segment list and render all curve
+    /// control triangles using the Loop-Blinn implicit test.
+    fn render_loop_blinn(&self, scene: &Scene, render_size: &RenderSize) {
+        let segments = scene.segments();
+        if segments.is_empty() {
+            return;
+        }
+
+        // Number of curves = total floats / 8 (each curve is 8 floats)
+        let curve_count = segments.len() / 8;
+        if curve_count == 0 {
+            return;
+        }
+
+        // Build instances: one per unique curve referenced by tiles
+        let instances = build_loop_blinn_instances(scene, curve_count);
+        if instances.is_empty() {
+            return;
+        }
+
+        // Config UBO is already uploaded by render_tiles, just bind it
+        self.gl.bind_buffer_base(
+            WebGl2RenderingContext::UNIFORM_BUFFER,
+            0,
+            Some(&self.programs.resources.config_buffer),
+        );
+
+        // Bind Texture 0: segments (same texture, shared with tile pass)
+        self.gl.active_texture(WebGl2RenderingContext::TEXTURE0);
+        self.gl.bind_texture(
+            WebGl2RenderingContext::TEXTURE_2D,
+            Some(&self.programs.resources.segments_texture),
+        );
+        self.gl.uniform1i(Some(&self.programs.loop_blinn_uniforms.segments_texture), 0);
+
+        // Upload instance data
+        let instance_bytes: &[u8] = bytemuck::cast_slice(&instances);
+        self.gl.bind_buffer(
+            WebGl2RenderingContext::ARRAY_BUFFER,
+            Some(&self.programs.resources.loop_blinn_instance_buffer),
+        );
+        self.gl.buffer_data_with_u8_array(
+            WebGl2RenderingContext::ARRAY_BUFFER,
+            instance_bytes,
+            WebGl2RenderingContext::DYNAMIC_DRAW,
+        );
+
+        // Draw instanced triangles
+        self.gl.bind_vertex_array(Some(&self.programs.resources.loop_blinn_vao));
+
+        self.gl.enable(WebGl2RenderingContext::BLEND);
+        self.gl.blend_func(
+            WebGl2RenderingContext::SRC_ALPHA,
+            WebGl2RenderingContext::ONE_MINUS_SRC_ALPHA,
+        );
+
+        // Disable depth writes for the boundary refinement pass
+        self.gl.enable(WebGl2RenderingContext::DEPTH_TEST);
+        self.gl.depth_func(WebGl2RenderingContext::ALWAYS);
+        self.gl.depth_mask(false);
+
+        self.gl.draw_arrays_instanced(
+            WebGl2RenderingContext::TRIANGLES,
+            0,
+            3, // 3 vertices per control triangle
+            instances.len() as i32,
+        );
+
+        // Restore depth state
+        self.gl.depth_func(WebGl2RenderingContext::LESS);
+        self.gl.depth_mask(true);
+
+        self.gl.bind_vertex_array(None);
+    }
+}
+
+// ============================================================================
+// Loop-Blinn instance builder
+// ============================================================================
+
+/// Build one `LoopBlinnInstance` per unique curve referenced by any tile.
+fn build_loop_blinn_instances(scene: &Scene, curve_count: usize) -> Vec<LoopBlinnInstance> {
+    let tiles = scene.tiles();
+    let segment_list = scene.segment_list();
+
+    let mut instances: Vec<LoopBlinnInstance> = Vec::with_capacity(curve_count);
+    let mut assigned = vec![false; curve_count];
+
+    for tile in tiles {
+        let list_offset = tile.segments[0].to_bits() as usize;
+        let seg_count = tile.segments[1].to_bits() as usize;
+
+        for i in 0..seg_count {
+            let idx = list_offset + i;
+            if idx >= segment_list.len() {
+                break;
+            }
+            let curve_idx = segment_list[idx] as usize;
+            if curve_idx < curve_count && !assigned[curve_idx] {
+                assigned[curve_idx] = true;
+                instances.push(LoopBlinnInstance {
+                    curve_index: curve_idx as u32,
+                    payload: tile.payload,
+                    paint_flag: tile.paint_and_rect_flag,
+                    depth_index: tile.depth_index,
+                });
+            }
+        }
+    }
+
+    instances
 }
 
 // ============================================================================
@@ -556,6 +738,50 @@ fn initialize_tile_vao(gl: &WebGl2RenderingContext, resources: &WebGlResources) 
     gl.enable_vertex_attrib_array(4);
     gl.vertex_attrib_i_pointer_with_i32(4, 3, WebGl2RenderingContext::UNSIGNED_INT, stride, 24);
     gl.vertex_attrib_divisor(4, 1);
+
+    gl.bind_vertex_array(None);
+}
+
+// ============================================================================
+// Loop-Blinn VAO setup
+// ============================================================================
+
+/// Sets up the VAO for the instanced Loop-Blinn program.
+/// Per-instance attributes come from `loop_blinn_instance_buffer`.
+///
+/// Instance layout (LoopBlinnInstance, 16 bytes):
+///   offset  0: curve_index (u32)  → location 0
+///   offset  4: payload (u32)      → location 1
+///   offset  8: paint_flag (u32)   → location 2
+///   offset 12: depth_index (u32)  → location 3
+fn initialize_loop_blinn_vao(gl: &WebGl2RenderingContext, resources: &WebGlResources) {
+    gl.bind_vertex_array(Some(&resources.loop_blinn_vao));
+    gl.bind_buffer(
+        WebGl2RenderingContext::ARRAY_BUFFER,
+        Some(&resources.loop_blinn_instance_buffer),
+    );
+
+    let stride = core::mem::size_of::<LoopBlinnInstance>() as i32; // 16 bytes
+
+    // Attribute 0: curve_index (u32)
+    gl.enable_vertex_attrib_array(0);
+    gl.vertex_attrib_i_pointer_with_i32(0, 1, WebGl2RenderingContext::UNSIGNED_INT, stride, 0);
+    gl.vertex_attrib_divisor(0, 1);
+
+    // Attribute 1: payload (u32)
+    gl.enable_vertex_attrib_array(1);
+    gl.vertex_attrib_i_pointer_with_i32(1, 1, WebGl2RenderingContext::UNSIGNED_INT, stride, 4);
+    gl.vertex_attrib_divisor(1, 1);
+
+    // Attribute 2: paint_flag (u32)
+    gl.enable_vertex_attrib_array(2);
+    gl.vertex_attrib_i_pointer_with_i32(2, 1, WebGl2RenderingContext::UNSIGNED_INT, stride, 8);
+    gl.vertex_attrib_divisor(2, 1);
+
+    // Attribute 3: depth_index (u32)
+    gl.enable_vertex_attrib_array(3);
+    gl.vertex_attrib_i_pointer_with_i32(3, 1, WebGl2RenderingContext::UNSIGNED_INT, stride, 12);
+    gl.vertex_attrib_divisor(3, 1);
 
     gl.bind_vertex_array(None);
 }

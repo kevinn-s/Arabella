@@ -22,6 +22,11 @@ pub(crate) mod render_tile {
     pub(crate) const VERTEX_SOURCE: &str = include_str!("shaders/render_tile.vert");
     pub(crate) const FRAGMENT_SOURCE: &str = include_str!("shaders/render_tile.frag");
 }
+
+pub(crate) mod loop_blinn {
+    pub(crate) const VERTEX_SOURCE: &str = include_str!("shaders/loop_blinn.vert");
+    pub(crate) const FRAGMENT_SOURCE: &str = include_str!("shaders/loop_blinn.frag");
+}
 /// Dimensions of the rendering target.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RenderSize {

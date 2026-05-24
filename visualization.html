@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quadratic Bezier Implicit Contribution - Shader Visualization</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
+h1 { color: #64ffda; margin-bottom: 10px; font-size: 1.5em; }
+.subtitle { color: #888; margin-bottom: 20px; font-size: 0.9em; }
+.container { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; max-width: 1400px; }
+.canvas-wrap { background: #0f0f23; border: 1px solid #333; border-radius: 8px; padding: 10px; }
+canvas { display: block; cursor: crosshair; }
+.panel { background: #0f0f23; border: 1px solid #333; border-radius: 8px; padding: 20px; min-width: 320px; max-width: 400px; }
+.panel h2 { color: #64ffda; font-size: 1.1em; margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 8px; }
+</style>
+</head>
+<body>
+<h1>Quadratic Bezier Implicit Contribution Shader</h1>
+<p class="subtitle">Drag P0, P1, P2 to move control points. Move mouse over canvas to see per-pixel evaluation.</p>
+<div class="container">
+  <div class="canvas-wrap">
+    <canvas id="mainCanvas" width="600" height="600"></canvas>
+  </div>
+  <div class="panel" id="infoPanel">
+    <h2>Step-by-Step Evaluation</h2>
+    <div id="stepInfo"></div>
+  </div>
+</div>
+<div class="container" style="margin-top:20px;">
+  <div class="panel" style="max-width:900px;">
+    <h2>Legend &amp; How It Works</h2>
+    <div id="legend"></div>
+  </div>
+</div>
+<script>
+
+// ====== Configuration ======
+const canvas = document.getElementById('mainCanvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// Control points (in canvas coords, y-down)
+let points = [
+  { x: 150, y: 450, label: 'P0' },
+  { x: 300, y: 100, label: 'P1' },
+  { x: 500, y: 400, label: 'P2' }
+];
+
+let mouse = { x: 300, y: 300 };
+let dragging = null;
+let hoverPoint = null;
+
+// ====== Shader logic (mirrors GLSL) ======
+function shaderEval(p0, p1, p2, pixel) {
+  let result = { contribution: 0, steps: [] };
+
+  // Step 1: Direction
+  let y_min, y_max, sign_v;
+  if (p2.y > p0.y) {
+    sign_v = 1.0; y_min = p0.y; y_max = p2.y;
+    result.steps.push({ name: 'Direction', detail: 'P2.y > P0.y → sign_v = +1 (upward traversal in screen coords)', color: '#4fc3f7' });
+  } else if (p2.y < p0.y) {
+    sign_v = -1.0; y_min = p2.y; y_max = p0.y;
+    result.steps.push({ name: 'Direction', detail: 'P2.y < P0.y → sign_v = -1 (downward traversal)', color: '#4fc3f7' });
+  } else {
+    result.steps.push({ name: 'Direction', detail: 'P2.y == P0.y → horizontal segment, contribution = 0', color: '#ef5350' });
+    return result;
+  }
+
+  // Step 2: Y-bounds
+  if (pixel.y < y_min || pixel.y >= y_max) {
+    result.steps.push({ name: 'Y-Bounds', detail: `pixel.y=${pixel.y.toFixed(1)} outside [${y_min.toFixed(1)}, ${y_max.toFixed(1)}) → 0`, color: '#ef5350' });
+    return result;
+  }
+  result.steps.push({ name: 'Y-Bounds', detail: `pixel.y=${pixel.y.toFixed(1)} inside [${y_min.toFixed(1)}, ${y_max.toFixed(1)}) ✓`, color: '#66bb6a' });
+
+  // Step 3: Chord and leg
+  let t_chord = (pixel.y - p0.y) / (p2.y - p0.y);
+  let x_chord = p0.x + t_chord * (p2.x - p0.x);
+
+  let x_leg;
+  let on_first_leg = (sign_v > 0) ? (pixel.y < p1.y) : (pixel.y > p1.y);
+
+  if (on_first_leg) {
+    let t_leg = (pixel.y - p0.y) / (p1.y - p0.y);
+    x_leg = p0.x + t_leg * (p1.x - p0.x);
+    result.steps.push({ name: 'Active Leg', detail: `On first leg (P0→P1): x_chord=${x_chord.toFixed(1)}, x_leg=${x_leg.toFixed(1)}`, color: '#ffb74d' });
+  } else {
+    if (Math.abs(p2.y - p1.y) < 1e-6) {
+      x_leg = p2.x;
+    } else {
+      let t_leg = (pixel.y - p1.y) / (p2.y - p1.y);
+      x_leg = p1.x + t_leg * (p2.x - p1.x);
+    }
+    result.steps.push({ name: 'Active Leg', detail: `On second leg (P1→P2): x_chord=${x_chord.toFixed(1)}, x_leg=${x_leg.toFixed(1)}`, color: '#ffb74d' });
+  }
+
+  // Step 4: Triangle bounds
+  let x_min_tri = Math.min(x_chord, x_leg);
+  let x_max_tri = Math.max(x_chord, x_leg);
+
+  if (pixel.x > x_max_tri) {
+    result.contribution = sign_v;
+    result.steps.push({ name: 'Triangle Bounds', detail: `pixel.x > x_max → in T2∪T3 region → contribution = ${sign_v.toFixed(1)} (INSIDE)`, color: '#66bb6a' });
+    result.region = 'T2T3';
+    return result;
+  } else if (pixel.x < x_min_tri) {
+    result.steps.push({ name: 'Triangle Bounds', detail: `pixel.x < x_min → left of control triangle → 0 (OUTSIDE)`, color: '#ef5350' });
+    result.region = 'outside';
+    return result;
+  }
+  result.steps.push({ name: 'Triangle Bounds', detail: `pixel.x in [${x_min_tri.toFixed(1)}, ${x_max_tri.toFixed(1)}] → in T1 (implicit test needed)`, color: '#ce93d8' });
+  result.region = 'T1';
+
+  // Step 5: Loop-Blinn implicit test
+  let denom = (p1.y - p2.y) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.y - p2.y);
+  if (Math.abs(denom) < 1e-10) {
+    result.steps.push({ name: 'Implicit Test', detail: 'Degenerate triangle (denom≈0) → 0', color: '#ef5350' });
+    return result;
+  }
+  let inv_denom = 1.0 / denom;
+  let w0 = ((p1.y - p2.y) * (pixel.x - p2.x) + (p2.x - p1.x) * (pixel.y - p2.y)) * inv_denom;
+  let w1 = ((p2.y - p0.y) * (pixel.x - p2.x) + (p0.x - p2.x) * (pixel.y - p2.y)) * inv_denom;
+  let w2 = 1.0 - w0 - w1;
+
+  let u = 0.5 * w1 + w2;
+  let v = w2;
+  let f = u * u - v;
+
+  result.steps.push({ name: 'Implicit Test', detail: `Barycentric: w0=${w0.toFixed(3)}, w1=${w1.toFixed(3)}, w2=${w2.toFixed(3)} → u=${u.toFixed(3)}, v=${v.toFixed(3)} → f = u²-v = ${f.toFixed(4)}`, color: '#ce93d8' });
+
+  // Step 6: Bulge direction
+  let bulges_right = x_leg > x_chord;
+
+  if (bulges_right) {
+    if (f > 0) {
+      result.contribution = sign_v;
+      result.steps.push({ name: 'Bulge Test', detail: `Bulges right, f>0 → pixel on bulge side → INSIDE (${sign_v.toFixed(1)})`, color: '#66bb6a' });
+    } else {
+      result.steps.push({ name: 'Bulge Test', detail: `Bulges right, f≤0 → pixel on chord side → OUTSIDE (0)`, color: '#ef5350' });
+    }
+  } else {
+    if (f < 0) {
+      result.contribution = sign_v;
+      result.steps.push({ name: 'Bulge Test', detail: `Bulges left, f<0 → pixel on chord side → INSIDE (${sign_v.toFixed(1)})`, color: '#66bb6a' });
+    } else {
+      result.steps.push({ name: 'Bulge Test', detail: `Bulges left, f≥0 → pixel on bulge side → OUTSIDE (0)`, color: '#ef5350' });
+    }
+  }
+
+  return result;
+}
+
+// ====== Drawing ======
+function drawBezier(p0, p1, p2, color, width) {
+  ctx.beginPath();
+  ctx.moveTo(p0.x, p0.y);
+  ctx.quadraticCurveTo(p1.x, p1.y, p2.x, p2.y);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.stroke();
+}
+
+function drawLine(a, b, color, width, dash) {
+  ctx.beginPath();
+  ctx.setLineDash(dash || []);
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawPoint(p, color, radius, label) {
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  if (label) {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText(label, p.x + radius + 4, p.y - radius);
+  }
+}
+
+function drawHeatmap() {
+  const p0 = points[0], p1 = points[1], p2 = points[2];
+  const step = 4;
+  for (let y = 0; y < H; y += step) {
+    for (let x = 0; x < W; x += step) {
+      let res = shaderEval(p0, p1, p2, { x, y });
+      let c = res.contribution;
+      if (c > 0) {
+        ctx.fillStyle = 'rgba(100, 255, 218, 0.15)';
+        ctx.fillRect(x, y, step, step);
+      } else if (c < 0) {
+        ctx.fillStyle = 'rgba(239, 83, 80, 0.15)';
+        ctx.fillRect(x, y, step, step);
+      }
+    }
+  }
+}
+
+function drawImplicitField() {
+  const p0 = points[0], p1 = points[1], p2 = points[2];
+  let denom = (p1.y - p2.y) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.y - p2.y);
+  if (Math.abs(denom) < 1e-10) return;
+  let inv_denom = 1.0 / denom;
+
+  const step = 6;
+  for (let y = 0; y < H; y += step) {
+    for (let x = 0; x < W; x += step) {
+      let w0 = ((p1.y - p2.y) * (x - p2.x) + (p2.x - p1.x) * (y - p2.y)) * inv_denom;
+      let w1 = ((p2.y - p0.y) * (x - p2.x) + (p0.x - p2.x) * (y - p2.y)) * inv_denom;
+      let w2 = 1.0 - w0 - w1;
+      // Only inside triangle
+      if (w0 >= 0 && w1 >= 0 && w2 >= 0) {
+        let u = 0.5 * w1 + w2;
+        let v = w2;
+        let f = u * u - v;
+        let intensity = Math.min(Math.abs(f) * 3, 0.4);
+        if (f > 0) {
+          ctx.fillStyle = `rgba(255, 183, 77, ${intensity})`;
+        } else {
+          ctx.fillStyle = `rgba(100, 181, 246, ${intensity})`;
+        }
+        ctx.fillRect(x, y, step, step);
+      }
+    }
+  }
+}
+
+function drawScanline() {
+  const p0 = points[0], p1 = points[1], p2 = points[2];
+  let sign_v, y_min, y_max;
+  if (p2.y > p0.y) { sign_v = 1; y_min = p0.y; y_max = p2.y; }
+  else if (p2.y < p0.y) { sign_v = -1; y_min = p2.y; y_max = p0.y; }
+  else return;
+
+  if (mouse.y < y_min || mouse.y >= y_max) return;
+
+  // Draw scanline
+  drawLine({ x: 0, y: mouse.y }, { x: W, y: mouse.y }, 'rgba(255,255,255,0.15)', 1, [4, 4]);
+
+  // Compute chord x
+  let t_chord = (mouse.y - p0.y) / (p2.y - p0.y);
+  let x_chord = p0.x + t_chord * (p2.x - p0.x);
+
+  // Compute leg x
+  let x_leg;
+  let on_first_leg = (sign_v > 0) ? (mouse.y < p1.y) : (mouse.y > p1.y);
+  if (on_first_leg) {
+    let t_leg = (mouse.y - p0.y) / (p1.y - p0.y);
+    x_leg = p0.x + t_leg * (p1.x - p0.x);
+  } else {
+    if (Math.abs(p2.y - p1.y) < 1e-6) { x_leg = p2.x; }
+    else { let t_leg = (mouse.y - p1.y) / (p2.y - p1.y); x_leg = p1.x + t_leg * (p2.x - p1.x); }
+  }
+
+  // Draw chord intersection
+  drawPoint({ x: x_chord, y: mouse.y }, '#4fc3f7', 5, 'chord');
+  // Draw leg intersection
+  drawPoint({ x: x_leg, y: mouse.y }, '#ffb74d', 5, 'leg');
+
+  // Mark the T1 region on scanline
+  let xMin = Math.min(x_chord, x_leg);
+  let xMax = Math.max(x_chord, x_leg);
+
+  // T1 bracket
+  ctx.fillStyle = 'rgba(206, 147, 216, 0.2)';
+  ctx.fillRect(xMin, mouse.y - 2, xMax - xMin, 4);
+
+  // T2/T3 region (right of max)
+  ctx.fillStyle = 'rgba(100, 255, 218, 0.12)';
+  ctx.fillRect(xMax, mouse.y - 2, W - xMax, 4);
+
+  // Labels
+  ctx.font = '11px monospace';
+  ctx.fillStyle = '#ce93d8';
+  ctx.fillText('T1', (xMin + xMax) / 2 - 6, mouse.y - 8);
+  ctx.fillStyle = '#64ffda';
+  ctx.fillText('T2∪T3 (inside)', xMax + 5, mouse.y - 8);
+  ctx.fillStyle = '#777';
+  ctx.fillText('outside', xMin - 50, mouse.y - 8);
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Background grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < W; i += 50) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, H); ctx.stroke(); }
+  for (let i = 0; i < H; i += 50) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(W, i); ctx.stroke(); }
+
+  const p0 = points[0], p1 = points[1], p2 = points[2];
+
+  // Heatmap of contributions
+  drawHeatmap();
+
+  // Implicit field inside the triangle
+  drawImplicitField();
+
+  // Control triangle
+  drawLine(p0, p1, 'rgba(255,255,255,0.3)', 1, [3, 3]);
+  drawLine(p1, p2, 'rgba(255,255,255,0.3)', 1, [3, 3]);
+  // Chord
+  drawLine(p0, p2, '#4fc3f7', 2, [6, 4]);
+
+  // Bezier curve
+  drawBezier(p0, p1, p2, '#64ffda', 3);
+
+  // Scanline visualization
+  drawScanline();
+
+  // Mouse pixel indicator
+  drawPoint(mouse, '#fff', 3);
+
+  // Control points
+  drawPoint(p0, '#66bb6a', 10, 'P0');
+  drawPoint(p1, '#ff7043', 10, 'P1');
+  drawPoint(p2, '#42a5f5', 10, 'P2');
+
+  // Update info panel
+  updateInfo();
+}
+
+function updateInfo() {
+  const p0 = points[0], p1 = points[1], p2 = points[2];
+  let res = shaderEval(p0, p1, p2, mouse);
+
+  let html = `<div style="margin-bottom:12px; font-size:0.85em; color:#888;">
+    Pixel: (${mouse.x.toFixed(0)}, ${mouse.y.toFixed(0)}) | 
+    Result: <b style="color:${res.contribution !== 0 ? '#64ffda' : '#ef5350'}">${res.contribution.toFixed(1)}</b>
+  </div>`;
+
+  res.steps.forEach((s, i) => {
+    html += `<div style="margin-bottom:8px; padding:8px; background:#1a1a2e; border-left:3px solid ${s.color}; border-radius:4px;">
+      <div style="font-weight:bold; color:${s.color}; font-size:0.85em;">Step ${i + 1}: ${s.name}</div>
+      <div style="font-size:0.8em; color:#ccc; margin-top:4px;">${s.detail}</div>
+    </div>`;
+  });
+
+  document.getElementById('stepInfo').innerHTML = html;
+}
+
+// ====== Legend ======
+document.getElementById('legend').innerHTML = `
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; font-size:0.85em;">
+  <div>
+    <b style="color:#64ffda;">● Green Region</b>: Contribution = +sign_v (inside winding)<br><br>
+    <b style="color:#ef5350;">● Red Region</b>: Contribution = -sign_v (inside, opposite direction)<br><br>
+    <b style="color:#ffb74d;">● Orange Shading</b>: f > 0 (Loop-Blinn, bulge/P1 side)<br><br>
+    <b style="color:#64b5f6;">● Blue Shading</b>: f < 0 (Loop-Blinn, chord side)
+  </div>
+  <div>
+    <b style="color:#4fc3f7;">--- Chord (P0→P2)</b>: The straight line between endpoints<br><br>
+    <b style="color:#ce93d8;">T1 Region</b>: Between chord and active leg — needs implicit test<br><br>
+    <b style="color:#64ffda;">T2∪T3 Region</b>: Past both chord and leg — always inside<br><br>
+    <b>Outside</b>: Left of both chord and leg — always outside
+  </div>
+</div>
+<div style="margin-top:16px; padding:12px; background:#1a1a2e; border-radius:6px; font-size:0.8em; line-height:1.6;">
+  <b style="color:#64ffda;">Algorithm Summary:</b><br>
+  1. <b>Direction:</b> Determine winding direction from P0.y vs P2.y<br>
+  2. <b>Y-Bounds:</b> Half-open interval [y_min, y_max) avoids double-counting at joins<br>
+  3. <b>Chord &amp; Leg:</b> At the pixel's y, find where the chord (P0→P2) and the active control-point leg cross<br>
+  4. <b>Triangle Bounds:</b> If pixel is past both → inside (T2∪T3). If before both → outside.<br>
+  5. <b>Implicit Test (T1):</b> In the ambiguous region, use Loop-Blinn's f = u² - v to classify pixel relative to curve<br>
+  6. <b>Bulge Direction:</b> Which side of chord the curve bulges determines which sign of f means "inside"
+</div>
+`;
+
+// ====== Interaction ======
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left;
+  mouse.y = e.clientY - rect.top;
+
+  if (dragging !== null) {
+    points[dragging].x = mouse.x;
+    points[dragging].y = mouse.y;
+  }
+
+  // Check hover
+  hoverPoint = null;
+  for (let i = 0; i < points.length; i++) {
+    let dx = mouse.x - points[i].x;
+    let dy = mouse.y - points[i].y;
+    if (dx * dx + dy * dy < 15 * 15) {
+      hoverPoint = i;
+      break;
+    }
+  }
+  canvas.style.cursor = hoverPoint !== null ? 'grab' : 'crosshair';
+
+  render();
+});
+
+canvas.addEventListener('mousedown', (e) => {
+  if (hoverPoint !== null) {
+    dragging = hoverPoint;
+    canvas.style.cursor = 'grabbing';
+  }
+});
+
+canvas.addEventListener('mouseup', () => {
+  dragging = null;
+});
+
+canvas.addEventListener('mouseleave', () => {
+  dragging = null;
+});
+
+// Initial render
+render();
+</script>
+</body>
+</html>

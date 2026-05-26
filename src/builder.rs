@@ -1,8 +1,8 @@
-use alloc::vec;
+use alloc::{format, vec};
 use alloc::vec::Vec;
-use peniko::Fill;
 use core::cell::RefCell;
 use fearless_simd::*;
+use peniko::Fill;
 
 use crate::{
     blocks::{Block, Blocks, TileBounds},
@@ -35,11 +35,13 @@ use lyon_geom::euclid::{Transform2D, UnknownUnit};
 
 pub(crate) struct Builder {
     pub tiles: TileMap<Tile>,
-    /// Curve control points for GPU texture (persists across shapes).
+    /// Per-tile clipped lines, written in tile order during `generate_tiles`.
+    /// Each line = 4 floats in PIXEL units (p0.x, p0.y, p1.x, p1.y), all
+    /// expressed in tile-LOCAL coordinates so the GPU just compares with
+    /// `pixel_in_tile`. One RGBA32F texel per line.
     pub segments: Vec<f32>,
-    /// Per-tile segment index lists for GPU indirection texture.
-    pub segment_list: Vec<u32>,
     /// Flattened line endpoints in F24Dot8 (cleared per shape).
+    /// Layout: 4 i32s per line = [p0x, p0y, p1x, p1y].
     pub(crate) line_buf: Vec<i32>,
     /// Sparse tile records from DDA binning (cleared per shape).
     pub(crate) blocks: Blocks,
@@ -48,7 +50,7 @@ pub(crate) struct Builder {
     /// Cached bounding box for the current shape.
     pub(crate) bbox: Box2D<f32>,
     pub(crate) level: Level,
-     pub(crate) shape_index: u32,
+    pub(crate) shape_index: u32,
 }
 
 impl Builder {
@@ -57,17 +59,16 @@ impl Builder {
             tiles: TileMap::new(|| Tile {
                 x: 0,
                 y: 0,
-                width: 0,
-                height: 0,
+                width: 16,
+                height: 8,
                 _pad: [0, 0],
-                backdrop: [0, 0],
+                backdrop: [0, 0, 0, 0, 0, 0, 0, 0],
                 segments: [0.0, 0.0],
                 payload: 0,
                 paint_and_rect_flag: 0,
                 depth_index: 0,
             }),
             segments: Vec::new(),
-            segment_list: Vec::new(),
             line_buf: Vec::new(),
             blocks: Blocks {
                 data: Vec::with_capacity(16384),
@@ -76,7 +77,7 @@ impl Builder {
             covers: RefCell::new(CoverStorage::new()),
             bbox: Box2D::new(Point2D::new(0.0, 0.0), Point2D::new(0.0, 0.0)),
             level,
-             shape_index: 0,
+            shape_index: 0,
         }
     }
 
@@ -92,16 +93,22 @@ impl Builder {
             Point2D::new(f32::NEG_INFINITY, f32::NEG_INFINITY),
         );
 
-        // ── Phase 2: Process path → segments + line_buf + bbox ──
+        // ── Phase 2: Process path → line_buf + bbox ──
         self.line_buf.clear();
-        let curve_base = (self.segments.len() / 8) as u32;
         dispatch!(self.level, simd => {
-            fill_impl(simd, path.iter(), transform, &mut self.segments, &mut self.line_buf, &mut self.bbox);
+            fill_impl(simd, path.iter(), transform, &mut self.line_buf, &mut self.bbox);
         });
 
         if self.line_buf.is_empty() {
             return;
         }
+
+        // Use the natural per-shape bbox produced by `expand_bbox` in path.rs.
+        // Do NOT clamp it to the canvas — the DDA needs to cover the entire
+        // geometry (including parts above/left of the canvas) so that winding
+        // cancellation works for closed paths whose edges extend off-screen.
+        // Off-canvas tiles produce no visible fragments anyway because the
+        // vertex shader places them outside the NDC range.
 
         if self.bbox.min.x >= self.bbox.max.x || self.bbox.min.y >= self.bbox.max.y {
             return;
@@ -121,49 +128,38 @@ impl Builder {
         }
 
         // ── Phase 5: DDA binning ──
-        // Now we need to map each flattened line → which curve it came from.
-        // Since fill_impl pushes 8 floats per curve to segments, and multiple
-        // flattened lines can come from one curve, we need the mapping.
-        //
-        // Solution: fill_impl also outputs a parallel array mapping
-        // line_index → curve_index. But that's a bigger refactor.
-        //
-        // SIMPLER APPROACH: For the DDA, use the curve_index directly.
-        // Each flattened line belongs to exactly one curve. Since curves
-        // produce 1+ flattened lines, we need fill_impl to tell us.
-        //
-        // SIMPLEST FIX: Store curve_id per flattened line alongside line_buf.
+        // Each entry in line_buf is one flattened straight line:
+        //   [p0x, p0y, p1x, p1y]  (4 i32s, F24Dot8)
+        // The DDA clips each line to tile boundaries and emits one Block per
+        // (line, tile) pair, with the *clipped* tile-local endpoints stored
+        // directly in the Block. No global "line id" indirection is needed.
 
-        let line_count = self.line_buf.len() / 5; // NOW 5 i32s per line: [p0x, p0y, p1x, p1y, curve_id]
+        let line_count = self.line_buf.len() / 4;
         let mut covers = self.covers.borrow_mut();
 
         for i in 0..line_count {
-            let base = i * 5;
+            let base = i * 4;
             let p0x = self.line_buf[base];
             let p0y = self.line_buf[base + 1];
             let p1x = self.line_buf[base + 2];
             let p1y = self.line_buf[base + 3];
-            let curve_id = self.line_buf[base + 4] as u32;
 
-            self.blocks.build_block(
-                &mut covers,
-                &tile_bounds,
-                curve_id, // ← THIS is the curve index into segments texture
-                p0x,
-                p0y,
-                p1x,
-                p1y,
-            );
+            self.blocks.build_block(&mut covers, &tile_bounds, p0x, p0y, p1x, p1y);
         }
     }
 
-    pub fn generate_tiles(&mut self, paint_index: u32, fill_rule: Fill,   payload: u32,
-        paint_flag: u32) {
-             let fill_rule_word = match fill_rule {
+    pub fn generate_tiles(
+        &mut self,
+        paint_index: u32,
+        fill_rule: Fill,
+        payload: u32,
+        paint_flag: u32,
+    ) {
+        let fill_rule_word = match fill_rule {
             Fill::NonZero => FILL_RULE_NONZERO,
             Fill::EvenOdd => FILL_RULE_EVENODD,
         };
-             let final_paint_flag = paint_flag | (fill_rule_word << 24);
+        let final_paint_flag = paint_flag | (fill_rule_word << 24);
         let covers = self.covers.borrow();
         let tile_bounds = TileBounds::from_box2d(&self.bbox);
 
@@ -171,19 +167,13 @@ impl Builder {
             return;
         }
 
-        // Sort blocks
+        // Sort blocks by (y, x) so all blocks for one tile sit in a contiguous range.
         self.blocks.sort_blocks();
 
-        let fill_rule_flag = match fill_rule {
-            Fill::NonZero => FILL_RULE_NONZERO,
-            Fill::EvenOdd => FILL_RULE_EVENODD,
-        };
-        let packed_paint = (COLOR_SOURCE_PAINT << COLOR_SOURCE_SHIFT)
-            | (PAINT_TYPE_SOLID << PAINT_TYPE_SHIFT)
-            | (fill_rule_flag << FILL_RULE_SHIFT)
-            | paint_index;
+        let current_depth = self.shape_index;
+        self.shape_index += 1;
 
-        // Propagate covers + emit tiles
+        // Propagate per-row backdrops + emit tiles.
         for row in 0..covers.rows() {
             let mut acc = [0i16; TILE_H];
 
@@ -194,20 +184,21 @@ impl Builder {
                     let global_x = (tile_bounds.min_col + col as i32) as u16;
                     let global_y = (tile_bounds.min_row + row as i32) as u16;
 
-                    // Find segment range and build segment_list
-                    let list_offset = self.segment_list.len() as u32;
+                    // Locate this tile's clipped lines in the sorted blocks vec
+                    // and write them as RGBA32F texels into `segments`.
                     let (block_start, block_count) =
                         find_segment_range(&self.blocks.data, global_x, global_y);
-                    for k in block_start..(block_start + block_count) {
-                        self.segment_list.push(self.blocks.data[k].segment_id);
-                    }
 
-                    let backdrop = [
-                        (acc[0] as i32) | ((acc[1] as i32) << 16),
-                        (acc[2] as i32) | ((acc[3] as i32) << 16),
-                    ];
-                     let current_depth = self.shape_index;
-                    self.shape_index += 1;
+                    let line_offset = (self.segments.len() / 4) as u32;
+                    for k in block_start..(block_start + block_count) {
+                        let b = &self.blocks.data[k];
+                        // Convert F24Dot8 → float pixels (tile-local).
+                        self.segments.extend_from_slice(&[
+                            b.p0x as f32 / 256.0, b.p0y as f32 / 256.0,
+                            b.p1x as f32 / 256.0, b.p1y as f32 / 256.0,
+                        ]);
+                    }
+                    let line_count = block_count as u32;
 
                     self.tiles.push(Tile {
                         x: global_x,
@@ -215,12 +206,12 @@ impl Builder {
                         width: TILE_W as u8,
                         height: TILE_H as u8,
                         _pad: [0, 0],
-                        backdrop,
+                        backdrop: acc,
                         segments: [
-                            f32::from_bits(list_offset),
-                            f32::from_bits(block_count as u32),
+                            f32::from_bits(line_offset),
+                            f32::from_bits(line_count),
                         ],
-                        payload: payload,
+                        payload,
                         paint_and_rect_flag: final_paint_flag,
                         depth_index: current_depth,
                     });
@@ -229,9 +220,83 @@ impl Builder {
                 if tagged {
                     let crossings = covers.get_crossings(row, col);
                     for s in 0..TILE_H {
-                        acc[s] += crossings[s] as i16;
+                        acc[s] += crossings[s];
                     }
                 }
+
+                // ── Per-tile dump for a y-pixel range of interest ──
+                // Set DEBUG_Y_RANGE to (None, None) to disable, or to
+                // (Some(min), Some(max)) to print every tile whose pixel
+                // span overlaps [min, max]. This shows exactly what the
+                // shader will see for the suspect scanlines.
+                const DEBUG_Y_RANGE: (Option<i32>, Option<i32>) = (None, None);
+                if let (Some(y_lo), Some(y_hi)) = DEBUG_Y_RANGE {
+                    let global_y = tile_bounds.min_row + row as i32;
+                    let tile_y_lo = global_y * TILE_H as i32;
+                    let tile_y_hi = tile_y_lo + TILE_H as i32 - 1;
+                    if tile_y_hi >= y_lo && tile_y_lo <= y_hi
+                        && (tagged || acc != [0i16; TILE_H])
+                    {
+                        let global_x = tile_bounds.min_col + col as i32;
+                        let (block_start, block_count) = find_segment_range(
+                            &self.blocks.data,
+                            global_x as u16,
+                            global_y as u16,
+                        );
+                        web_sys::console::log_1(
+                            &alloc::format!(
+                                "[TILE-DUMP] tile=({},{}) global_pixel_y=[{}..{}] backdrop={:?} lines={}",
+                                global_x, global_y, tile_y_lo, tile_y_hi, acc, block_count,
+                            )
+                            .into(),
+                        );
+                        for k in block_start..(block_start + block_count) {
+                            let b = &self.blocks.data[k];
+                            web_sys::console::log_1(
+                                &alloc::format!(
+                                    "    line[{}] tile-local F24Dot8: ({},{}) -> ({},{})  (px: ({:.3},{:.3})->({:.3},{:.3}))",
+                                    k - block_start,
+                                    b.p0x, b.p0y, b.p1x, b.p1y,
+                                    b.p0x as f32 / 256.0, b.p0y as f32 / 256.0,
+                                    b.p1x as f32 / 256.0, b.p1y as f32 / 256.0,
+                                )
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
+
+            // ── Row-balance sanity check ──
+            // After processing every column in this tile row, the running
+            // accumulator MUST be zero on every scanline. A non-zero value
+            // means at least one emitted line on that scanline didn't have
+            // a matching opposite-direction partner — its winding will
+            // streak rightward off the canvas.
+            //
+            // We log the global tile-row index, the residual values, and
+            // which scanlines (within the tile row) leaked. The y-pixel
+            // for scanline `s` in tile row `row` is:
+            //   y_pixel = (tile_bounds.min_row + row) * TILE_H + s
+            if acc != [0i16; TILE_H] {
+                let global_row = tile_bounds.min_row + row as i32;
+                let mut leaked: alloc::string::String = alloc::string::String::new();
+                for s in 0..TILE_H {
+                    if acc[s] != 0 {
+                        let y_pixel = global_row * TILE_H as i32 + s as i32;
+                        leaked.push_str(&alloc::format!(
+                            " [row_in_tile={} y_pixel={} residual={}]",
+                            s, y_pixel, acc[s],
+                        ));
+                    }
+                }
+                web_sys::console::log_1(
+                    &alloc::format!(
+                        "[ROW-BALANCE LEAK] tile_row={} (global_row={}) acc={:?} leaked:{}",
+                        row, global_row, acc, leaked,
+                    )
+                    .into(),
+                );
             }
         }
     }
@@ -239,8 +304,6 @@ impl Builder {
     pub fn reset(&mut self) {
         self.tiles.clear();
         self.segments.clear();
-        self.segment_list.clear();
-        self.line_buf.clear();
         self.blocks.reset();
     }
 }
@@ -252,14 +315,15 @@ fn find_segment_range(blocks: &[Block], x: u16, y: u16) -> (usize, usize) {
     (start, end - start)
 }
 
-pub const TILE_W: usize = 4;
-pub const TILE_H: usize = 4;
+pub const TILE_W: usize = 16;
+pub const TILE_H: usize = 8;
 
+#[derive(Clone)]
 pub struct CoverStorage {
     /// Bit vector: 1 bit per cell. Packed into u32 words.
     pub tag: Vec<u32>,
     /// Dense crossings: one [i8; TILE_H] per cell in the path's bbox.
-    pub backdrops: Vec<[i8; TILE_H]>,
+    pub backdrops: Vec<[i16; TILE_H]>,
     /// Cached column count for current shape (avoids recomputing from bounds).
     col_count: usize,
     /// Cached row count for current shape.
@@ -277,16 +341,24 @@ impl CoverStorage {
         }
     }
 
+    /// Tile column count for a shape, computed by the SAME rule used by
+    /// `TileBounds::from_box2d`: `ceil(max.x / TILE_W) - floor(min.x / TILE_W)`.
+    /// (Computing it as `ceil(max-min)/TILE_W` is off-by-one whenever the
+    /// bbox doesn't start exactly on a tile boundary, which silently drops
+    /// edge-row writes in the DDA.)
     #[inline(always)]
     pub fn tile_cols_from_bounds(bounds: &Box2D<f32>) -> usize {
-        let width = (bounds.max.x - bounds.min.x).ceil() as usize;
-        width.div_ceil(TILE_W)
+        let max_col = (bounds.max.x / TILE_W as f32).ceil() as i32;
+        let min_col = (bounds.min.x / TILE_W as f32).floor() as i32;
+        (max_col - min_col).max(0) as usize
     }
 
+    /// Tile row count for a shape — same rule as `tile_cols_from_bounds`.
     #[inline(always)]
     pub fn tile_rows_from_bounds(bounds: &Box2D<f32>) -> usize {
-        let height = (bounds.max.y - bounds.min.y).ceil() as usize;
-        height.div_ceil(TILE_H)
+        let max_row = (bounds.max.y / TILE_H as f32).ceil() as i32;
+        let min_row = (bounds.min.y / TILE_H as f32).floor() as i32;
+        (max_row - min_row).max(0) as usize
     }
 
     #[inline(always)]
@@ -310,7 +382,7 @@ impl CoverStorage {
         self.tag.resize(tag_words, 0);
 
         self.backdrops.clear();
-        self.backdrops.resize(total_cells, [0i8; TILE_H]);
+        self.backdrops.resize(total_cells, [0i16; TILE_H]);
     }
 
     /// Set the tag bit for cell (row, col). Called during binning.
@@ -351,7 +423,7 @@ impl CoverStorage {
 
     /// Get mutable reference to crossings for cell (row, col).
     #[inline(always)]
-    pub fn crossings_at(&mut self, row: usize, col: usize) -> &mut [i8; TILE_H] {
+    pub fn crossings_at(&mut self, row: usize, col: usize) -> &mut [i16; TILE_H] {
         debug_assert!(row < self.row_count);
         debug_assert!(col < self.col_count);
         &mut self.backdrops[row * self.col_count + col]
@@ -359,14 +431,12 @@ impl CoverStorage {
 
     /// Read crossings for cell (row, col).
     #[inline(always)]
-    pub fn get_crossings(&self, row: usize, col: usize) -> [i8; TILE_H] {
+    pub fn get_crossings(&self, row: usize, col: usize) -> [i16; TILE_H] {
         debug_assert!(row < self.row_count);
         debug_assert!(col < self.col_count);
         self.backdrops[row * self.col_count + col]
     }
 
-    /// Propagate crossings into backdrops via left-to-right prefix scan.
-    /// `bounds` is the same Box2D used in `reset_for_shape`.
     pub fn propagate(&self, bounds: &Box2D<f32>) -> Vec<(u16, u16, [i16; TILE_H])> {
         let cols = self.col_count;
         let rows = self.row_count;

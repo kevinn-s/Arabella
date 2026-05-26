@@ -14,7 +14,7 @@ pub struct Tile {
     pub width: u8,
     pub height: u8,
     pub _pad: [u8; 2],
-    pub backdrop: [i32; 2],
+    pub backdrop: [i16; 8],
     pub segments: [f32; 2],
     pub payload: u32,
     pub paint_and_rect_flag: u32,

@@ -210,64 +210,69 @@ async fn test_renders_tiger_svg() {
 
     // ── Build scene (CPU binning) ──
     let mut scene = Scene::new(W, H);
+    let mut counter = 0;
     let t0 = performance.now();
+    for fill_item in &fills {
+        // if fill_item.color == Color::BLACK {
+            counter += 1;
+            // if counter == 19     {
+                // web_sys::console::log_1(&format!("Path Data: {:?}", fill_item.path).into());
+                scene.fill(
+                    &fill_item.path,
+                    FillRule::NonZero,
+                    fill_item.transform,
+                    fill_item.color,
+                );
+                    web_sys::console::log_1(
+                &format!(
+                    "path = {:?}",
+                &fill_item.path
+                )
+                .into());
+                 web_sys::console::log_1(
+                &format!(
+                    "segment list = {:?}",
+                    scene.segment_list()
+                )
+                .into());
 
-    // Helper: detect "orangeish" tiger fills.
-    // The Ghostscript_Tiger.svg uses a few different orange tones for the
-    // body, ranging roughly around (#ce6e34 — #ed8a3a). Any color where
-    //   R is dominant, G is moderate, B is small, all > 0
-    // is treated as part of the orange family.
-    fn is_orange(c: Color) -> bool {
-        let [r, g, b, a] = c.components;
-        a > 0.5
-            && r > 0.55
-            && r > g + 0.10           // R clearly dominant over G
-            && g > b + 0.10           // G clearly dominant over B
-            && b < 0.35               // B is small
-            && r < 0.99               // exclude pure red / white
+                web_sys::console::log_1(
+                &format!(
+                    "segments = {:?}",
+                    scene.segments()
+                )
+                .into(),
+                );
+   let cell = scene.covers();
+let covers_ref = cell.borrow();
+for row in 0..covers_ref.rows() {
+    for col in 0..covers_ref.cols() {
+        let crossings = covers_ref.get_crossings(row, col);
+        let tagged = covers_ref.is_tagged(row, col);
+        if row >= 1 && row <= 80 && col >= 1 && col <= 80 {
+            web_sys::console::log_1(
+                &format!(
+                    "row and col[{},{}] tagged={} crossings=[{},{},{},{}]",
+                    row, col, tagged,
+                    crossings[0], crossings[1], crossings[2], crossings[3],
+                )
+                .into(),
+            );
+        }
     }
-
-    // Walk every fill, but only push orange ones into the scene. Also log
-    // the original index of each orange shape so you can identify which
-    // one(s) produce artifacts.
-    let mut orange_index_in_full_svg: usize = 0;
-    let mut orange_count_pushed: usize = 0;
-    for (i, fill_item) in fills.iter().enumerate() {
-      
-        orange_index_in_full_svg = i;
-
-        // web_sys::console::log_1(
-        //     &format!(
-        //         "[ORANGE #{} | full-svg-index={}] color={:?} path={:?}",
-        //         orange_count_pushed,
-        //         i,
-        //         fill_item.color.components,
-        //         fill_item.path,
-        //     )
-        //     .into(),
-        // );
-
-     
-        scene.fill(
-            &fill_item.path,
-            FillRule::NonZero,
-            fill_item.transform,
-            fill_item.color,
-        );
-         
-    // web_sys::console::log_1(&format!(
-    //     "Filtered to {} orange fills | {} tiles | line-segments = {:?}",
-    //     orange_count_pushed,
-    //     scene.tiles().len(),
-    //     scene.segments(),
-    // ).into());
-    
-
-        orange_count_pushed += 1;
+// }
+            // }
+        }
     }
     let t1 = performance.now();
 
-
+    web_sys::console::log_1(&format!(
+        "CPU binning: {:.2} ms | {} tiles | {} segments | {} segment-list entries",
+        t1 - t0,
+        scene.tiles().len(),
+        scene.segments().len() / 8,  // 8 floats per curve (2 texels)
+        scene.segment_list().len()
+    ).into());
 
     // ── Create canvas + WebGL renderer ──
     let canvas = create_canvas(W as u32, H as u32, 1.0);
@@ -289,7 +294,7 @@ async fn test_renders_tiger_svg() {
     ).into());
 }
 
-// #[wasm_bindgen_test]
+#[wasm_bindgen_test]
 async fn test_renders_circle() {
     console_error_panic_hook::set_once();
     let _ = console_log::init_with_level(log::Level::Debug);

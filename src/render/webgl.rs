@@ -12,7 +12,7 @@ use crate::{
     tile::{Tile,TileMap}
 };
 
-use alloc::vec;
+use alloc::{format, vec};
 use alloc::vec::Vec;
 use bytemuck::{Pod, Zeroable};
 use web_sys::wasm_bindgen::{JsCast, JsValue};
@@ -71,7 +71,7 @@ impl WebGlPrograms {
             return;
         }
 
-        // Each segment is 4 floats (ctrl.x, ctrl.y, end.x, end.y) = 1 RGBA texel
+        // Each LINE record is 4 floats (p0.x, p0.y, p1.x, p1.y) = 1 RGBA32F texel.
         let texel_count = segments.len() / 4;
         let required_height = (texel_count as u32).div_ceil(max_w).max(1);
 
@@ -236,7 +236,7 @@ fn set_nearest_clamp(gl: &WebGl2RenderingContext) {
 struct TileUniforms {
     config_block_index: u32,
     segments_texture: WebGlUniformLocation,
-    segment_list_texture: WebGlUniformLocation,
+    segment_list_texture: Option<WebGlUniformLocation>,
     encoded_paints_texture: Option<WebGlUniformLocation>,
     gradient_texture: Option<WebGlUniformLocation>,
 }
@@ -249,7 +249,9 @@ fn get_tile_uniforms(gl: &WebGl2RenderingContext, program: &WebGlProgram) -> Til
     TileUniforms {
         config_block_index,
         segments_texture: gl.get_uniform_location(program, "u_segments_texture").unwrap(),
-        segment_list_texture: gl.get_uniform_location(program, "u_segment_list_texture").unwrap(),
+        // Optional: the shader no longer needs the indirection list since clipped
+        // lines are stored contiguously per-tile in `u_segments_texture`.
+        segment_list_texture: gl.get_uniform_location(program, "u_segment_list_texture"),
         encoded_paints_texture: gl.get_uniform_location(program, "u_encoded_paints_texture"),
         gradient_texture: gl.get_uniform_location(program, "u_gradient_texture"),
     }
@@ -350,13 +352,15 @@ impl WebGlRenderer {
         );
         self.gl.uniform1i(Some(&self.programs.tile_uniforms.segments_texture), 0);
 
-        // Bind Texture 1: segment list
-        self.gl.active_texture(WebGl2RenderingContext::TEXTURE1);
-        self.gl.bind_texture(
-            WebGl2RenderingContext::TEXTURE_2D,
-            Some(&self.programs.resources.segment_list_texture),
-        );
-        self.gl.uniform1i(Some(&self.programs.tile_uniforms.segment_list_texture), 1);
+        // Bind Texture 1: segment list (only if shader still references it)
+        if let Some(loc) = &self.programs.tile_uniforms.segment_list_texture {
+            self.gl.active_texture(WebGl2RenderingContext::TEXTURE1);
+            self.gl.bind_texture(
+                WebGl2RenderingContext::TEXTURE_2D,
+                Some(&self.programs.resources.segment_list_texture),
+            );
+            self.gl.uniform1i(Some(loc), 1);
+        }
 
         // Bind Texture 2: encoded paints (if available)
         if let Some(loc) = &self.programs.tile_uniforms.encoded_paints_texture {
@@ -394,8 +398,7 @@ impl WebGlRenderer {
         self.gl.bind_vertex_array(Some(&self.programs.resources.tile_vao));
 
         self.gl.enable(WebGl2RenderingContext::DEPTH_TEST);
-self.gl.depth_func(WebGl2RenderingContext::LESS);
-self.gl.depth_mask(true);
+self.gl.depth_mask(false);
         self.gl.enable(WebGl2RenderingContext::BLEND);
         self.gl.blend_func(
             WebGl2RenderingContext::SRC_ALPHA,
@@ -519,43 +522,41 @@ fn create_shader_program(
     program
 }
 
-// ============================================================================
-// VAO setup
-// ============================================================================
-
 fn initialize_tile_vao(gl: &WebGl2RenderingContext, resources: &WebGlResources) {
     gl.bind_vertex_array(Some(&resources.tile_vao));
-    gl.bind_buffer(
-        WebGl2RenderingContext::ARRAY_BUFFER,
-        Some(&resources.tiles_buffer),
-    );
+    gl.bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&resources.tiles_buffer));
 
-    let stride = core::mem::size_of::<Tile>() as i32;
+    let stride = core::mem::size_of::<Tile>() as i32; // Automatically handles the size expansion
 
-    // Attribute 0: x, y (2 × u16 packed as 1 u32)
+    // Attribute 0: x, y
     gl.enable_vertex_attrib_array(0);
     gl.vertex_attrib_i_pointer_with_i32(0, 1, WebGl2RenderingContext::UNSIGNED_INT, stride, 0);
     gl.vertex_attrib_divisor(0, 1);
 
-    // Attribute 1: width, height, _pad (4 × u8 packed as 1 u32)
+    // Attribute 1: width, height
     gl.enable_vertex_attrib_array(1);
     gl.vertex_attrib_i_pointer_with_i32(1, 1, WebGl2RenderingContext::UNSIGNED_INT, stride, 4);
     gl.vertex_attrib_divisor(1, 1);
 
-    // Attribute 2: backdrop[2] (2 × i32)
+    // Attribute 2: backdrop [0..4] (First 4 elements of i16; 8)
     gl.enable_vertex_attrib_array(2);
-    gl.vertex_attrib_i_pointer_with_i32(2, 2, WebGl2RenderingContext::INT, stride, 8);
+    gl.vertex_attrib_i_pointer_with_i32(2, 4, WebGl2RenderingContext::SHORT, stride, 8);
     gl.vertex_attrib_divisor(2, 1);
 
-    // Attribute 3: segments[2] (2 × f32 stored as u32 via from_bits)
+    // Attribute 3: backdrop [4..8] (Last 4 elements of i16; 8)
     gl.enable_vertex_attrib_array(3);
-    gl.vertex_attrib_i_pointer_with_i32(3, 2, WebGl2RenderingContext::UNSIGNED_INT, stride, 16);
+    gl.vertex_attrib_i_pointer_with_i32(3, 4, WebGl2RenderingContext::SHORT, stride, 16); // Offset moves +8 bytes
     gl.vertex_attrib_divisor(3, 1);
 
-    // Attribute 4: payload, paint_and_rect_flag, depth_index (3 × u32)
+    // Attribute 4: segments[2] (Pushed from location 3 to 4)
     gl.enable_vertex_attrib_array(4);
-    gl.vertex_attrib_i_pointer_with_i32(4, 3, WebGl2RenderingContext::UNSIGNED_INT, stride, 24);
+    gl.vertex_attrib_i_pointer_with_i32(4, 2, WebGl2RenderingContext::UNSIGNED_INT, stride, 24); // Offset moves to 24
     gl.vertex_attrib_divisor(4, 1);
+
+    // Attribute 5: payload, paint_flag, depth_index (Pushed from location 4 to 5)
+    gl.enable_vertex_attrib_array(5);
+    gl.vertex_attrib_i_pointer_with_i32(5, 3, WebGl2RenderingContext::UNSIGNED_INT, stride, 32); // Offset moves to 32
+    gl.vertex_attrib_divisor(5, 1);
 
     gl.bind_vertex_array(None);
 }

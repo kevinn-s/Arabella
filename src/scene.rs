@@ -1,10 +1,14 @@
+use core::cell::RefCell;
+
+use alloc::format;
+use alloc::string::String;
 use alloc::vec::Vec;
 use fearless_simd::Level;
 use lyon_geom::euclid::{Transform2D, UnknownUnit};
 use lyon_path::{FillRule, Path};
 use peniko::{BrushRef, Color, Fill};
 
-use crate::builder::Builder;
+use crate::builder::{Builder, CoverStorage};
 use crate::tile::Tile;
 
 // ============================================================================
@@ -86,7 +90,11 @@ impl Scene {
         // Phase 2: Propagate covers → emit Tile structs
         self.builder.generate_tiles(paint_index, Fill::NonZero,   payload,
         paint_flag);
+
     }
+
+
+
 
     /// Get the generated tiles for GPU upload.
     pub fn tiles(&self) -> &[Tile] {
@@ -97,15 +105,21 @@ impl Scene {
     pub fn segments(&self) -> &[f32] {
         &self.builder.segments
     }
+    
 
     /// Reset scene for a new frame.
     pub fn reset(&mut self) {
-        self.builder.reset();
+        // self.builder.reset();
         self.paint_index_counter = 0;
     }
 
+    pub fn covers(&self) -> &RefCell<CoverStorage> {
+    &self.builder.covers
+}
      pub fn segment_list(&self) -> &[u32] {
-        &self.builder.segment_list
+        // segment_list is no longer used — clipped lines are stored directly
+        // per-tile in `segments`. Kept as `&[]` for API compatibility with tests.
+        &[]
     }
 }
 

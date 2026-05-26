@@ -1,4 +1,5 @@
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
+
 /// Flattens a quadratic Bézier curve into line segments using Blaze's
 /// recursive midpoint subdivision method.
 ///
@@ -14,15 +15,14 @@ use alloc::vec::Vec;
 /// Uses L1 distance from chord midpoint to control point.
 /// Threshold of 256 = 1.0 pixel L1 deviation (~0.5 px max curve deviation).
 /// For coarser binning, increase to 512 or 768.
-const FLATNESS_THRESHOLD: i32 = 256;
+const FLATNESS_THRESHOLD: i32 = 32;
 
 pub fn flatten_quadratic<F>(
     p0x: i32, p0y: i32,
     p1x: i32, p1y: i32,
     p2x: i32, p2y: i32,
     callback: &mut F,
-)
-where
+) where
     F: FnMut(i32, i32, i32, i32),
 {
     flatten_recursive(p0x, p0y, p1x, p1y, p2x, p2y, callback);
@@ -33,29 +33,24 @@ fn flatten_recursive<F>(
     p1x: i32, p1y: i32,
     p2x: i32, p2y: i32,
     callback: &mut F,
-)
-where
+) where
     F: FnMut(i32, i32, i32, i32),
 {
     if is_flat_enough(p0x, p0y, p1x, p1y, p2x, p2y) {
         // Flat enough — emit as a line from p0 to p2.
         callback(p0x, p0y, p2x, p2y);
+        // web_sys::console::log_1(&format!("lines = {} {} {} {}", p0x, p0y, p2x, p2y).into());
+
     } else {
         // Not flat — split at midpoint (De Casteljau).
-        //
-        // m01 = midpoint(p0, p1)
-        // m12 = midpoint(p1, p2)
-        // mid = midpoint(m01, m12)
-        //
-        // Left half:  (p0, m01, mid)
-        // Right half: (mid, m12, p2)
-
-        let m01x = (p0x + p1x) >> 1;
-        let m01y = (p0y + p1y) >> 1;
-        let m12x = (p1x + p2x) >> 1;
-        let m12y = (p1y + p2y) >> 1;
-        let midx = (m01x + m12x) >> 1;
-        let midy = (m01y + m12y) >> 1;
+        // Uses truncating division instead of arithmetic bit-shifts to eliminate 
+        // 1-bit coordinate drift discrepancies across signed viewport domains.
+        let m01x = (p0x + p1x) / 2;
+        let m01y = (p0y + p1y) / 2;
+        let m12x = (p1x + p2x) / 2;
+        let m12y = (p1y + p2y) / 2;
+        let midx = (m01x + m12x) / 2;
+        let midy = (m01y + m12y) / 2;
 
         flatten_recursive(p0x, p0y, m01x, m01y, midx, midy, callback);
         flatten_recursive(midx, midy, m12x, m12y, p2x, p2y, callback);
@@ -79,8 +74,8 @@ fn is_flat_enough(
     }
 
     // Midpoint of chord p0→p2:
-    let mx = (p0x + p2x) >> 1;
-    let my = (p0y + p2y) >> 1;
+    let mx = (p0x + p2x) / 2;
+    let my = (p0y + p2y) / 2;
 
     // L1 distance from midpoint to control point:
     let dx = (mx - p1x).abs();

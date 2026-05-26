@@ -1,0 +1,158 @@
+#version 300 es
+precision highp float;
+precision highp int;
+precision highp usampler2D;
+
+#define TILE_WIDTH                       16u
+#define TILE_HEIGHT                      8u
+
+#define COLOR_SOURCE_PAYLOAD             0u
+#define COLOR_SOURCE_PAINT               1u
+#define PAINT_TYPE_SOLID                 0u
+
+#define COLOR_SOURCE_SHIFT               30u
+#define PAINT_TYPE_SHIFT                 27u
+#define FILL_RULE_SHIFT                  24u
+#define COLOR_SOURCE_MASK                0xC0000000u
+#define PAINT_TYPE_MASK                  0x38000000u
+#define FILL_RULE_MASK                   0x07000000u
+
+#define FILL_RULE_NONZERO                0u
+#define FILL_RULE_EVENODD                1u
+
+layout(std140) uniform config {
+    uint u_width;
+    uint u_height;
+    uint u_tile_height;
+    uint u_segments_tex_width_bits;
+    uint u_segment_list_tex_width_bits;
+    uint u_encoded_paints_tex_width_bits;
+    uint u_negate_ndc;
+    uint _pad0;
+};
+
+uniform sampler2D u_segments_texture;
+uniform usampler2D u_segment_list_texture;
+
+flat in ivec4 v_backdrop_lo; // Split attribute components
+flat in ivec4 v_backdrop_hi; // Split attribute components
+flat in uvec2 v_segment;
+flat in uint  v_payload;
+flat in uint  v_paint_flag;
+flat in uvec2 v_tile_origin_pixels;
+flat in uint  v_depth_index;
+in vec2       v_local_xy;
+
+out vec4 fragColor;
+
+ivec2 segments_idx_to_coord(uint idx) {
+    return ivec2(
+        int(idx & ((1u << u_segments_tex_width_bits) - 1u)),
+        int(idx >> u_segments_tex_width_bits)
+    );
+}
+
+ivec2 segment_list_idx_to_coord(uint idx) {
+    return ivec2(
+        int(idx & ((1u << u_segment_list_tex_width_bits) - 1u)),
+        int(idx >> u_segment_list_tex_width_bits)
+    );
+}
+
+uint get_line_index(uint list_offset, uint i) {
+    uint idx = list_offset + i;
+    return texelFetch(u_segment_list_texture, segment_list_idx_to_coord(idx), 0).r;
+}
+
+void read_line(uint line_idx, out vec2 p0, out vec2 p1) {
+    // One flattened line = one RGBA32F texel: (p0.x, p0.y, p1.x, p1.y)
+    vec4 t = texelFetch(u_segments_texture, segments_idx_to_coord(line_idx), 0);
+    p0 = t.xy;
+    p1 = t.zw;
+}
+
+vec4 unpack_rgba8(uint packed) {
+    float r = float((packed >>  0u) & 0xFFu) / 255.0;
+    float g = float((packed >>  8u) & 0xFFu) / 255.0;
+    float b = float((packed >> 16u) & 0xFFu) / 255.0;
+    float a = float((packed >> 24u) & 0xFFu) / 255.0;
+    return vec4(r, g, b, a);
+}
+
+// Line-ray winding contribution (Blaze LineArrayTiled style).
+// Returns +1 / -1 if the horizontal ray going right from `pixel` crosses the line, else 0.
+// Sign convention matches the previous quad_contribution: line going down -> -1, going up -> +1.
+float line_contribution(vec2 p0, vec2 p1, vec2 pixel) {
+    if (p0.y == p1.y) return 0.0;
+
+    float sign_v = (p0.y < p1.y) ? -1.0 : 1.0;
+    float y_min = min(p0.y, p1.y);
+    float y_max = max(p0.y, p1.y);
+
+    // Half-open interval matches the CPU-side scanline crossings rule.
+    if (pixel.y < y_min || pixel.y >= y_max) return 0.0;
+
+    float t = (pixel.y - p0.y) / (p1.y - p0.y);
+    float x_at_t = mix(p0.x, p1.x, t);
+
+    float dist = pixel.x - x_at_t;
+float alpha = clamp(dist + 0.5, 0.0, 1.0);
+
+return sign_v * alpha;
+}
+
+void main() {
+    uint fill_rule = (v_paint_flag & FILL_RULE_MASK) >> FILL_RULE_SHIFT;
+    uint seg_offset = v_segment.x;
+    uint seg_count  = v_segment.y;
+
+    // Get per-scanline backdrop for this pixel row (Updated to max 7u for 8 vertical rows)
+    int backdrop_index = int(clamp(uint(floor(v_local_xy.y)) - v_tile_origin_pixels.y, 0u, 7u));
+    
+    int raw_winding = 0;
+    if (backdrop_index < 4) {
+        // Access the low vector (indices 0, 1, 2, 3)
+        if (backdrop_index == 0)      raw_winding = v_backdrop_lo.x;
+        else if (backdrop_index == 1) raw_winding = v_backdrop_lo.y;
+        else if (backdrop_index == 2) raw_winding = v_backdrop_lo.z;
+        else                          raw_winding = v_backdrop_lo.w;
+    } else {
+        // Access the high vector (indices 4, 5, 6, 7)
+        int hi_index = backdrop_index - 4;
+        if (hi_index == 0)      raw_winding = v_backdrop_hi.x;
+        else if (hi_index == 1) raw_winding = v_backdrop_hi.y;
+        else if (hi_index == 2) raw_winding = v_backdrop_hi.z;
+        else                    raw_winding = v_backdrop_hi.w;
+    }
+
+    // Convert area-based backdrop (±256 = one full winding) to integer winding
+    float winding = float(raw_winding) / 256.0;
+    winding = round(winding);  // Cleaner and symmetric for negative values
+    // Pixel position in same coordinate space as curve data
+    vec2 pixel = v_local_xy + vec2(0.5);
+
+    // Evaluate ALL lines in this tile at this pixel
+    for (uint s = 0u; s < seg_count; s++) {
+        uint line_idx = get_line_index(seg_offset, s);
+        vec2 p0, p1;
+        read_line(line_idx, p0, p1);
+        winding += line_contribution(p0, p1, pixel);
+    }
+
+    // Apply fill rule
+    float coverage;
+    if (fill_rule == FILL_RULE_NONZERO) {
+        coverage = (abs(winding) > 0.5) ? 1.0 : 0.0;
+    } else {
+        // Even-odd
+        coverage = (mod(abs(winding), 2.0) > 0.5) ? 1.0 : 0.0;
+    }
+
+    if (coverage < 0.004) {
+        discard;
+    }
+
+    // Resolve paint
+    vec4 paint = unpack_rgba8(v_payload);
+    fragColor = vec4(paint.rgb * paint.a * coverage, paint.a * coverage);
+}

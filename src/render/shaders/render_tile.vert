@@ -2,21 +2,23 @@
 precision highp float;
 precision highp int;
 
-#define TILE_WIDTH  4u
-#define TILE_HEIGHT 4u
+#define TILE_WIDTH  16u
+#define TILE_HEIGHT 8u
 
-// Tile struct layout (36 bytes):
+// 🌟 UPDATED DOCUMENTATION FOR THE NEW 44-BYTE MEMORY LAYOUT:
 //   offset  0: x(u16), y(u16)           → attr 0 as 1 uint
 //   offset  4: width(u8), height(u8), pad[2] → attr 1 as 1 uint
-//   offset  8: backdrop[2] (2 × i32)    → attr 2 as ivec2
-//   offset 16: segments[2] (2 × u32)    → attr 3 as uvec2
-//   offset 24: payload(u32), paint_flag(u32), depth_index(u32) → attr 4 as uvec3
+//   offset  8: backdrop[0..3] (4 × i16) → attr 2 as ivec4
+//   offset 16: backdrop[4..7] (4 × i16) → attr 3 as ivec4
+//   offset 24: segments[2] (2 × u32)    → attr 4 as uvec2
+//   offset 32: payload(u32), paint_flag(u32), depth_index(u32) → attr 5 as uvec3
 
 layout(location = 0) in uint  a_xy;
 layout(location = 1) in uint  a_size;
-layout(location = 2) in ivec2 a_backdrop;
-layout(location = 3) in uvec2 a_segment;
-layout(location = 4) in uvec3 a_misc;
+layout(location = 2) in ivec4 a_backdrop_lo; // Rows 0-3
+layout(location = 3) in ivec4 a_backdrop_hi; // Rows 4-7
+layout(location = 4) in uvec2 a_segment;     // Moved from 3 to 4
+layout(location = 5) in uvec3 a_misc;        // Moved from 4 to 5
 
 layout(std140) uniform config {
     uint u_width;
@@ -29,8 +31,9 @@ layout(std140) uniform config {
     uint _pad0;
 };
 
-flat out ivec2 v_backdrop;
-flat out uvec2 v_segment;           // x = offset into segment_list, y = count
+flat out ivec4 v_backdrop_lo; 
+flat out ivec4 v_backdrop_hi; 
+flat out uvec2 v_segment;  
 flat out uint  v_payload;
 flat out uint  v_paint_flag;
 flat out uvec2 v_tile_origin_pixels;
@@ -44,7 +47,6 @@ void main() {
     uint tile_w = a_size & 0xFFu;
     uint tile_h = (a_size >> 8u) & 0xFFu;
 
-    // Generate quad corner from gl_VertexID (TRIANGLE_STRIP)
     vec2 corner = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
 
     vec2 pixel_pos = vec2(
@@ -62,11 +64,12 @@ void main() {
 
     float depth = 1.0 - (float(a_misc.z) / 10000.0) * 2.0;
     gl_Position = vec4(ndc, 0.0, 1.0);
-
-    v_backdrop = a_backdrop;
-    v_segment  = a_segment;  // x = offset (from f32::from_bits), y = count
-    v_payload  = a_misc.x;
-    v_paint_flag = a_misc.y;
+    
+    v_backdrop_lo = a_backdrop_lo; 
+    v_backdrop_hi = a_backdrop_hi; 
+    v_segment     = a_segment;  
+    v_payload     = a_misc.x;
+    v_paint_flag  = a_misc.y;
     v_tile_origin_pixels = uvec2(
         tile_x_idx * TILE_WIDTH,
         tile_y_idx * TILE_HEIGHT

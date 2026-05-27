@@ -683,50 +683,72 @@ impl TileBounds {
 }
 
 // ============================================================================
-// record_per_scanline_crossings — integer winding at pixel centers
+// record_per_scanline_crossings — signed AREA per scanline (8.8 fixed-point)
 //
-// MUST match the GPU shader's `line_contribution` exactly.
+// For each scanline `r` (0..TILE_H), this records the signed y-overlap of the
+// line with the strip [r*256, (r+1)*256), accumulated in 8.8 fixed-point so
+// that a full crossing of the strip contributes ±256 = one full winding unit.
 //
-// The shader does, for each pixel center `pixel.y = r + 0.5`:
-//   if (y_min <= pixel.y < y_max) winding += sign
+// Why area, not crossings:
+//   The GPU does multisampling and queries the per-scanline backdrop at
+//   sub-pixel positions. With pure crossings (point-sample at pixel center),
+//   a sub-sample whose y differs from the center by even a fraction can read
+//   a backdrop that doesn't match the geometric reality — leaving residual
+//   winding that streaks across the seam. With signed area, the backdrop
+//   smoothly tracks how much winding has accumulated by the time we enter
+//   any sub-pixel position within the row, so MSAA samples (and tent / box
+//   filters in future) all see consistent values.
 //
-// We mirror that on the CPU side: for each scanline `r` (0..TILE_H), the
-// pixel center in tile-local F24Dot8 is `r*256 + 128`. A line `(y0, y1)`
-// contributes ±256 (= one full winding in 8.8 fixed-point) to scanline r
-// iff `y_min <= r*256 + 128 < y_max`. The sign convention (down→-1, up→+1)
-// also matches the shader.
+// Sign convention (matches the GPU's per-line crossings test):
+//   line going DOWN  (y0 < y1) → -1 winding (-256 in 8.8)
+//   line going UP    (y0 > y1) → +1 winding (+256 in 8.8)
 //
-// This is a pure point-sample winding rule. It is NOT area-based — area
-// would put fractional values on partially-covered scanlines, which the
-// shader cannot reproduce because it only sees the pixel center.
+// This is the canonical Blaze / FreeType / Skia signed-area accumulator.
 // ============================================================================
 
 #[inline(always)]
 fn record_per_scanline_crossings(crossings: &mut [i16; TILE_H], y0: i32, y1: i32) {
     if y0 == y1 { return; }
 
-    let (y_min, y_max, sign): (i32, i32, i16) = if y0 < y1 {
-        (y0, y1, -256)   // line goes DOWN → -1 winding (in 8.8)
+    let (y_top, y_bot, sign): (i32, i32, i32) = if y0 < y1 {
+        (y0, y1, -1)    // line going DOWN
     } else {
-        (y1, y0, 256)    // line goes UP   → +1 winding (in 8.8)
+        (y1, y0,  1)    // line going UP
     };
 
-    // Iterate the scanlines whose pixel centers can possibly fall in [y_min, y_max).
-    // Pixel center for scanline `r` is `r*256 + 128`.
-    //
-    // Smallest r with center >= y_min:   r >= (y_min - 128) / 256, ceil
-    //                                  ⇒ r_lo = (y_min - 128 + 255) >> 8  for y_min > 128
-    //                                    (use a generic clamp + check below)
-    // Largest r with center < y_max:     r < (y_max - 128) / 256
-    //                                  ⇒ r_hi = (y_max - 129) >> 8       (inclusive)
-    //
-    // To stay simple and correct at boundaries, we just walk every TILE_H scanline
-    // and test. TILE_H is 8 — branch cost is negligible.
-    for r in 0..TILE_H {
-        let center = (r as i32) * 256 + 128;
-        if y_min <= center && center < y_max {
-            crossings[r] = crossings[r].saturating_add(sign);
+    // Integer scanline rows for the top and bottom of the line.
+    // `y_top` is inclusive; `y_bot - 1` makes the bottom row inclusive too.
+    let row_top = (y_top >> 8) as usize;
+    let row_bot = ((y_bot - 1) >> 8) as usize;
+
+    // Defensive clamping — caller should already have clipped to the tile,
+    // but rounding can place y values exactly on the upper boundary.
+    let row_top = row_top.min(TILE_H - 1);
+    let row_bot = row_bot.min(TILE_H - 1);
+
+    // Sub-pixel offsets within the top and bottom rows.
+    let fy0 = y_top - ((row_top as i32) << 8);   // ∈ [0, 256)
+    let fy1 = y_bot - ((row_bot as i32) << 8);   // ∈ (0, 256]
+
+    if row_top == row_bot {
+        // Line lives entirely within one scanline.
+        // Y-extent inside the strip = (y_bot - y_top), in 8.8 units.
+        let area = ((y_bot - y_top) * sign) as i16;
+        crossings[row_top] = crossings[row_top].saturating_add(area);
+    } else {
+        // Top row: from y_top to top-of-row-below = (256 - fy0).
+        let top_area = ((256 - fy0) * sign) as i16;
+        crossings[row_top] = crossings[row_top].saturating_add(top_area);
+
+        // Middle rows fully covered: ±256 (one full winding) each.
+        let full = (256 * sign) as i16;
+        for r in (row_top + 1)..row_bot {
+            crossings[r] = crossings[r].saturating_add(full);
         }
+
+        // Bottom row: from top-of-row to y_bot = fy1.
+        let bot_area = (fy1 * sign) as i16;
+        crossings[row_bot] = crossings[row_bot].saturating_add(bot_area);
     }
 }
 

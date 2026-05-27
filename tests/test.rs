@@ -19,6 +19,18 @@ use arabella::{
 
 wasm_bindgen_test_configure!(run_in_browser);
 
+/// A single SVG paint operation in document order.
+///
+/// SVG paths can declare both `fill` and `stroke`. The pico_svg parser splits
+/// such paths into two separate `Item` entries (Fill then Stroke), preserving
+/// document order. Rendering each `PaintOp` in the order they were collected
+/// matches the SVG painter's algorithm: each later op composites on top of
+/// previous ops via alpha blending.
+enum PaintOp {
+    Fill(FillItem),
+    Stroke(StrokeFillItem),
+}
+
 /// Collected fill item with lyon_path::Path instead of kurbo::BezPath
 struct FillItem {
     color: Color,
@@ -26,30 +38,66 @@ struct FillItem {
     transform: Transform2D<f32, UnknownUnit, UnknownUnit>,
 }
 
-fn collect_fills(
+/// Collected stroke item with lyon_path::Path + kurbo::Stroke style.
+///
+/// SVG strokes carry a width (and per-spec, line cap / join / miter-limit
+/// attributes which `pico_svg` doesn't currently parse). We fall back to
+/// SVG defaults: cap = butt, join = miter, miter-limit = 4.
+#[derive(Debug)]
+struct StrokeFillItem {
+    color: Color,
+    path: Path,
+    style: kurbo::Stroke,
+    transform: Transform2D<f32, UnknownUnit, UnknownUnit>,
+}
+
+/// Walk the SVG tree in document order, emitting every fill and stroke as a
+/// `PaintOp`. The original two-pass collector (collect all fills, then all
+/// strokes) gave the wrong z-order: highlight overlays got drawn under their
+/// base shapes. This single-pass collector preserves SVG-spec painter order.
+///
+/// We also DO NOT filter out white fills here. Translucent white fills are
+/// the technique the Ghostscript_Tiger.svg uses to create highlights on the
+/// orange face — skipping them erases the cheekbone / muzzle / ear shading.
+fn collect_paint_ops(
     item: &Item,
     parent_transform: Transform2D<f32, UnknownUnit, UnknownUnit>,
-    out: &mut Vec<FillItem>,
+    out: &mut Vec<PaintOp>,
 ) {
     match item {
         Item::Fill(fill) => {
-            let comps = fill.color.components;
-            let is_white = comps[0] > 0.99 && comps[1] > 0.99 && comps[2] > 0.99 && comps[3] > 0.99;
-            if is_white { return; }
+            // Skip fills with effectively-zero alpha (truly invisible). We
+            // do NOT skip white opaque fills any more — they may legitimately
+            // be the page background, but they may also be highlight overlays
+            // with reduced opacity that we want to keep.
+            if fill.color.components[3] < 0.00 {
+                return;
+            }
 
-            // Convert kurbo BezPath → lyon_path::Path
             let lyon_path = kurbo_to_lyon(&fill.path);
-            out.push(FillItem {
+            out.push(PaintOp::Fill(FillItem {
                 color: fill.color,
                 path: lyon_path,
                 transform: parent_transform,
-            });
+            }));
         }
-        Item::Stroke(_) => {}
+        Item::Stroke(stroke) => {
+            if stroke.color.components[3] < 0.005 {
+                return;
+            }
+
+            let lyon_path = kurbo_to_lyon(&stroke.path);
+            let style = kurbo::Stroke::new(stroke.width);
+            out.push(PaintOp::Stroke(StrokeFillItem {
+                color: stroke.color,
+                path: lyon_path,
+                style,
+                transform: parent_transform,
+            }));
+        }
         Item::Group(group) => {
-            // Combine transforms
-            let affine = group.affine;
-            let coeffs = affine.as_coeffs();
+            // Compose the group's affine onto the parent transform and recurse.
+            let coeffs = group.affine.as_coeffs();
             let group_tf = Transform2D::new(
                 coeffs[0] as f32, coeffs[1] as f32,
                 coeffs[2] as f32, coeffs[3] as f32,
@@ -58,13 +106,12 @@ fn collect_fills(
             let combined = parent_transform.then(&group_tf);
 
             for child in &group.children {
-                collect_fills(child, combined, out);
+                collect_paint_ops(child, combined, out);
             }
         }
     }
 }
 
-/// Convert kurbo::BezPath to lyon_path::Path
 fn kurbo_to_lyon(bez: &kurbo::BezPath) -> Path {
     let mut builder = Path::builder();
     for el in bez.elements() {
@@ -93,94 +140,9 @@ fn kurbo_to_lyon(bez: &kurbo::BezPath) -> Path {
             }
         }
     }
-    // Ensure path is closed if builder hasn't seen an explicit close
     builder.build()
 }
 
-// #[wasm_bindgen_test]
-async fn test_cpu_binning_tiger_svg() {
-    console_error_panic_hook::set_once();
-    let _ = console_log::init_with_level(log::Level::Debug);
-
-    const W: u16 = 1080;
-    const H: u16 = 520;
-
-    let performance = web_sys::window().unwrap().performance().unwrap();
-
-    // ── Parse SVG ──
-    let svg_str = include_str!("../assets/Ghostscript_Tiger.svg");
-    let pico_svg = PicoSvg::load(svg_str, 1.0).expect("Failed to parse SVG");
-
-    // ── Collect fills with lyon paths ──
-    let scale = 1.0_f32;
-    let base_transform = Transform2D::new(
-        scale, 0.0,
-        0.0, -scale,
-        20.0, H as f32,
-    );
-
-    let mut fills: Vec<FillItem> = Vec::new();
-    for item in &pico_svg.items {
-        collect_fills(item, base_transform, &mut fills);
-    }
-
-    web_sys::console::log_1(
-        &format!("Collected {} fill paths from tiger SVG", fills.len()).into()
-    );
-
-    // ── Benchmark CPU binning ──
-    let mut scene = Scene::new(W, H);
-
-    let t0 = performance.now();
-
-    for fill_item in &fills {
-        scene.fill(
-            &fill_item.path,
-            FillRule::NonZero,
-            fill_item.transform,
-            fill_item.color,
-        );
-    }
-
-    let t1 = performance.now();
-
-    let tile_count = scene.tiles().len();
-    let segment_count = scene.segments().len() / 4;
-    let segment_list_count = scene.segment_list().len();
-    web_sys::console::log_1(&format!(
-        "CPU binning: {:.2} ms | {} tiles | {} segments | {} segment-list entries",
-        t1 - t0, tile_count, segment_count, scene.segment_list().len()
-    ).into());
-
-
-    // ── Run multiple iterations for stable timing ──
-    let iterations = 10;
-    let t_start = performance.now();
-    for _ in 0..iterations {
-        scene.reset();
-        for fill_item in &fills {
-            scene.fill(
-                &fill_item.path,
-                FillRule::NonZero,
-                fill_item.transform,
-                fill_item.color,
-            );
-        }
-    }
-    let t_end = performance.now();
-
-    let avg_ms = (t_end - t_start) / iterations as f64;
-    web_sys::console::log_1(&format!(
-        "Average CPU binning over {} iterations: {:.2} ms ({:.1} FPS equivalent)",
-        iterations, avg_ms, 1000.0 / avg_ms
-    ).into());
-}
-fn unpack_fixed_i16(word: i32) -> (f32, f32) {
-    let lo = (word & 0xFFFF) as u16 as i16;
-    let hi = ((word >> 16) & 0xFFFF) as u16 as i16;
-
-    (lo as f32 / 256.0, hi as f32 / 256.0)
-}
 #[wasm_bindgen_test]
 async fn test_renders_tiger_svg() {
     console_error_panic_hook::set_once();
@@ -192,6 +154,9 @@ async fn test_renders_tiger_svg() {
     let performance = web_sys::window().unwrap().performance().unwrap();
 
     // ── Parse SVG ──
+    // Switch back to the tiger SVG — it actually has strokes (thin black
+    // outlines on the pink and white shapes), unlike SVG_Logo.svg which is
+    // fill-only. This stresses the new Scene::stroke pipeline.
     let svg_str = include_str!("../assets/Ghostscript_Tiger.svg");
     let pico_svg = PicoSvg::load(svg_str, 1.0).expect("Failed to parse SVG");
 
@@ -202,71 +167,49 @@ async fn test_renders_tiger_svg() {
         20.0, H as f32,
     );
 
-    let mut fills: Vec<FillItem> = Vec::new();
+    // Walk the SVG tree once in document order, collecting every fill and
+    // stroke into a single ordered list. Document order is what the SVG
+    // painter's algorithm expects — each later op composites on top of
+    // previous ops via alpha blending.
+    let mut paint_ops: Vec<PaintOp> = Vec::new();
     for item in &pico_svg.items {
-        collect_fills(item, base_transform, &mut fills);
+        collect_paint_ops(item, base_transform, &mut paint_ops);
     }
 
+    let n_fills = paint_ops.iter().filter(|op| matches!(op, PaintOp::Fill(_))).count();
+    let n_strokes = paint_ops.iter().filter(|op| matches!(op, PaintOp::Stroke(_))).count();
+    web_sys::console::log_1(&format!(
+        "SVG parsed: {} paint ops ({} fills + {} strokes)",
+        paint_ops.len(),
+        n_fills,
+        n_strokes,
+    ).into());
 
     // ── Build scene (CPU binning) ──
+    // Render every paint op in document order. Each fill / stroke composites
+    // on top of previous ops via alpha blending.
     let mut scene = Scene::new(W, H);
     let t0 = performance.now();
 
-    // Helper: detect "orangeish" tiger fills.
-    // The Ghostscript_Tiger.svg uses a few different orange tones for the
-    // body, ranging roughly around (#ce6e34 — #ed8a3a). Any color where
-    //   R is dominant, G is moderate, B is small, all > 0
-    // is treated as part of the orange family.
-    fn is_orange(c: Color) -> bool {
-        let [r, g, b, a] = c.components;
-        a > 0.5
-            && r > 0.55
-            && r > g + 0.10           // R clearly dominant over G
-            && g > b + 0.10           // G clearly dominant over B
-            && b < 0.35               // B is small
-            && r < 0.99               // exclude pure red / white
+    for op in &paint_ops {
+        match op {
+            PaintOp::Fill(f) => {
+                scene.fill(&f.path, FillRule::NonZero, f.transform, f.color);
+            }
+            PaintOp::Stroke(s) => {
+                scene.stroke(&s.path, &s.style, s.transform, s.color);
+            }
+        }
     }
 
-    // Walk every fill, but only push orange ones into the scene. Also log
-    // the original index of each orange shape so you can identify which
-    // one(s) produce artifacts.
-    let mut orange_index_in_full_svg: usize = 0;
-    let mut orange_count_pushed: usize = 0;
-    for (i, fill_item) in fills.iter().enumerate() {
-      
-        orange_index_in_full_svg = i;
-
-        // web_sys::console::log_1(
-        //     &format!(
-        //         "[ORANGE #{} | full-svg-index={}] color={:?} path={:?}",
-        //         orange_count_pushed,
-        //         i,
-        //         fill_item.color.components,
-        //         fill_item.path,
-        //     )
-        //     .into(),
-        // );
-
-     
-        scene.fill(
-            &fill_item.path,
-            FillRule::NonZero,
-            fill_item.transform,
-            fill_item.color,
-        );
-         
-    // web_sys::console::log_1(&format!(
-    //     "Filtered to {} orange fills | {} tiles | line-segments = {:?}",
-    //     orange_count_pushed,
-    //     scene.tiles().len(),
-    //     scene.segments(),
-    // ).into());
-    
-
-        orange_count_pushed += 1;
-    }
     let t1 = performance.now();
 
+    web_sys::console::log_1(&format!(
+        "CPU Stage: {:.2} ms ({} fills + {} strokes)",
+        t1 - t0,
+        n_fills,
+        n_strokes,
+    ).into());
 
 
     // ── Create canvas + WebGL renderer ──

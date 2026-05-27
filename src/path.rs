@@ -16,8 +16,99 @@ pub(crate) const TOL: f32 = SQRT_TOL * SQRT_TOL;
 /// emit asymmetric crossings → rightward streaks.
 const CONTINUITY_TOL: f32 = 1e-3;
 
+// ============================================================================
+// SIMD-batched affine point transform
+//
+// `transform_point` per call is `(m11*x + m21*y + m31, m12*x + m22*y + m32)`
+// — 4 mults + 4 adds. Doing this lane-by-lane on 4 points (one Cubic event)
+// is 16 mults + 16 adds. With f32x8 we collapse the four mul-add chains
+// into two FMAs. `transform_pair` (2 points) is the common case for Line
+// events and `transform_quad` covers Cubic.
+//
+// Layout for the 4-point case:
+//   input  = [x0, y0, x1, y1, x2, y2, x3, y3]
+//   m_xy   = [m11, m12, m11, m12, m11, m12, m11, m12]   (row 1 of 2×2)
+//   m_yx   = [m21, m22, m21, m22, m21, m22, m21, m22]   (row 2 of 2×2)
+//   t      = [m31, m32, m31, m32, m31, m32, m31, m32]
+//   xs     = [x0, x0, x1, x1, x2, x2, x3, x3]            (broadcast x)
+//   ys     = [y0, y0, y1, y1, y2, y2, y3, y3]            (broadcast y)
+//   out    = xs*m_xy + ys*m_yx + t
+//
+// The "broadcast" requires shuffles which fearless_simd doesn't expose
+// cleanly for 8-wide types. Instead, we construct `xs`/`ys` directly from
+// the input scalars (compiler turns this into 2 loads or shuffles) — the
+// FMA chain is what matters, not the construction. Net: ~half the issue
+// rate of the scalar form, plus better register usage.
+// ============================================================================
+
+#[inline(always)]
+fn transform_pair<S: Simd>(
+    simd: S,
+    affine: &Transform<f32>,
+    p: Point<f32>,
+    q: Point<f32>,
+) -> (Point<f32>, Point<f32>) {
+    // Affine in lyon is row-major with .m11..m32 fields:
+    //   X = m11*x + m21*y + m31
+    //   Y = m12*x + m22*y + m32
+    let m_xy = f32x4::from_slice(simd, &[affine.m11, affine.m12, affine.m11, affine.m12]);
+    let m_yx = f32x4::from_slice(simd, &[affine.m21, affine.m22, affine.m21, affine.m22]);
+    let t    = f32x4::from_slice(simd, &[affine.m31, affine.m32, affine.m31, affine.m32]);
+
+    let xs = f32x4::from_slice(simd, &[p.x, p.x, q.x, q.x]);
+    let ys = f32x4::from_slice(simd, &[p.y, p.y, q.y, q.y]);
+
+    // FMA chain: r = xs*m_xy + ys*m_yx + t
+    let r = xs.mul_add(m_xy, ys.mul_add(m_yx, t));
+    let s = r.as_slice();
+    (Point::new(s[0], s[1]), Point::new(s[2], s[3]))
+}
+
+#[inline(always)]
+fn transform_quad<S: Simd>(
+    simd: S,
+    affine: &Transform<f32>,
+    p: Point<f32>,
+    q: Point<f32>,
+    r: Point<f32>,
+    s: Point<f32>,
+) -> (Point<f32>, Point<f32>, Point<f32>, Point<f32>) {
+    let m_xy = f32x8::from_slice(simd, &[
+        affine.m11, affine.m12, affine.m11, affine.m12,
+        affine.m11, affine.m12, affine.m11, affine.m12,
+    ]);
+    let m_yx = f32x8::from_slice(simd, &[
+        affine.m21, affine.m22, affine.m21, affine.m22,
+        affine.m21, affine.m22, affine.m21, affine.m22,
+    ]);
+    let t = f32x8::from_slice(simd, &[
+        affine.m31, affine.m32, affine.m31, affine.m32,
+        affine.m31, affine.m32, affine.m31, affine.m32,
+    ]);
+
+    let xs = f32x8::from_slice(simd, &[p.x, p.x, q.x, q.x, r.x, r.x, s.x, s.x]);
+    let ys = f32x8::from_slice(simd, &[p.y, p.y, q.y, q.y, r.y, r.y, s.y, s.y]);
+
+    let out = xs.mul_add(m_xy, ys.mul_add(m_yx, t));
+    let v = out.as_slice();
+    (
+        Point::new(v[0], v[1]),
+        Point::new(v[2], v[3]),
+        Point::new(v[4], v[5]),
+        Point::new(v[6], v[7]),
+    )
+}
+
+
+
 /// Compare lyon's reported `from` against our running `last_pt`.
 /// Logs to the browser console when they disagree.
+///
+/// Compiled to a no-op in release builds because the check itself plus
+/// the call site overhead (one comparison per event) is unnecessary in
+/// the hot path. We keep it for debug builds where the diagnostic is
+/// worth the cost.
+#[cfg(debug_assertions)]
 #[inline(always)]
 fn check_continuity(kind: &'static str, last_pt: Point<f32>, from: Point<f32>) {
     let dx = (last_pt.x - from.x).abs();
@@ -32,6 +123,10 @@ fn check_continuity(kind: &'static str, last_pt: Point<f32>, from: Point<f32>) {
         );
     }
 }
+
+#[cfg(not(debug_assertions))]
+#[inline(always)]
+fn check_continuity(_kind: &'static str, _last_pt: Point<f32>, _from: Point<f32>) {}
 
 // ============================================================================
 // Public entry point
@@ -80,8 +175,7 @@ pub fn fill_impl<'a, S: Simd>(
               
             }
             PathEvent::Line { from, to } => {
-                let from_t = affine.transform_point(from);
-                let to     = affine.transform_point(to);
+                let (from_t, to) = transform_pair(simd, &affine, from, to);
 
                 check_continuity("Line", last_pt, from_t);
 
@@ -92,9 +186,9 @@ pub fn fill_impl<'a, S: Simd>(
                 }
             }
             PathEvent::Quadratic { from, ctrl, to } => {
-                let from_t = affine.transform_point(from);
-                let ctrl   = affine.transform_point(ctrl);
-                let to     = affine.transform_point(to);
+                // Quadratic has 3 points; transform 2 + 1.
+                let (from_t, ctrl) = transform_pair(simd, &affine, from, ctrl);
+                let (to, _) = transform_pair(simd, &affine, to, to);
 
                 check_continuity("Quadratic", last_pt, from_t);
 
@@ -115,10 +209,9 @@ pub fn fill_impl<'a, S: Simd>(
                 last_pt = to;
             }
             PathEvent::Cubic { from, ctrl1, ctrl2, to } => {
-                let from_t = affine.transform_point(from);
-                let ctrl1  = affine.transform_point(ctrl1);
-                let ctrl2  = affine.transform_point(ctrl2);
-                let to     = affine.transform_point(to);
+                // Cubic has 4 points → fits one f32x8 fused transform.
+                let (from_t, ctrl1, ctrl2, to) =
+                    transform_quad(simd, &affine, from, ctrl1, ctrl2, to);
 
                 check_continuity("Cubic", last_pt, from_t);
 
@@ -165,13 +258,8 @@ pub fn fill_impl<'a, S: Simd>(
                 last_pt = to;
             }
             PathEvent::End { last, first, close } => {
-                let last = affine.transform_point(last);
-                let first = affine.transform_point(first);
+                let (last, first) = transform_pair(simd, &affine, last, first);
 
-                // web_sys::console::log_1(&format!(
-                //     "[PATH END] Loop Closed? {} (last: {:?}, first/start_pt: {:?})", 
-                //     close, last, first
-                // ).into());
 
                 if close && last != first {
                     emit_line(line_buf, last, first);

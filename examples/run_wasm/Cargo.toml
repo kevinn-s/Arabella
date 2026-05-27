@@ -1,0 +1,15 @@
+[package]
+name = "run_wasm"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+# Native CLI orchestrator: builds a target wasm crate, copies it to a temp
+# dir, spins up a small HTTP server, and opens the browser. We use it via
+# `cargo run_wasm -p native_webgl --release`.
+#
+# Mirrors vello/examples/run_wasm.
+
+[dependencies]
+cargo-run-wasm = "0.4.0"

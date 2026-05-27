@@ -1,0 +1,50 @@
+[package]
+name = "native_webgl"
+version = "0.1.0"
+description = "Interactive Arabella demo running in the browser via WebGL2."
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+# `cdylib` is what wasm-bindgen consumes; `rlib` keeps the crate usable as
+# a library by `wasm-bindgen-test` if we want to add browser tests later.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pull arabella from the workspace root.
+arabella = { path = "../..", features = ["webgl"] }
+
+# Wasm/JS interop — same versions as the rest of the workspace.
+console_error_panic_hook = "0.1"
+console_log = "1.0"
+log = "0.4.29"
+
+js-sys = "0.3.91"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4.71"
+web-sys = { version = "0.3.91", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CssStyleDeclaration",
+    "WebGl2RenderingContext",
+    "MouseEvent",
+    "WheelEvent",
+    "KeyboardEvent",
+    "Performance",
+    "DomRect",
+    "DomRectReadOnly",
+    "Event",
+] }
+
+# Geometry / scene types used by the demo (paint-op collection).
+lyon_geom = "1.0.19"
+lyon_path = "1.0.19"
+peniko = { version = "0.6.1", default-features = false, features = ["libm"] }
+kurbo = { version = "0.13.0" }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.50"

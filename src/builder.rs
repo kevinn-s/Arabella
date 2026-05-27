@@ -174,13 +174,33 @@ impl Builder {
         self.shape_index += 1;
 
         // Propagate per-row backdrops + emit tiles.
+        //
+        // Hot loop: runs once per (row, col) cell across the shape's bbox.
+        // Two micro-optimizations applied:
+        //
+        // 1. `acc != [0i16; 8]` is checked via a single 16-byte compare
+        //    using bytemuck::cast<[i16; 8], u128>. The compiler-generated
+        //    elementwise compare was a measurable hotspot.
+        //
+        // 2. `acc[s] += crossings[s]` becomes one `i16x8` SIMD add via
+        //    fearless_simd. WASM SIMD128 maps this to a single `i16x8.add`
+        //    instruction, vs. 8 scalar adds. On every tagged tile.
+        //
+        // The acc value passed to the Tile struct is stored back into a
+        // [i16; 8] array, so downstream code (GPU upload via bytemuck) is
+        // unchanged.
+        let zero_acc_bits: u128 = 0;
         for row in 0..covers.rows() {
-            let mut acc = [0i16; TILE_H];
+            let mut acc_arr = [0i16; TILE_H];
 
             for col in 0..covers.cols() {
                 let tagged = covers.is_tagged(row, col);
 
-                if tagged || acc != [0i16; TILE_H] {
+                // Fast-path: 16-byte compare vs zero rather than 8x i16 compare.
+                let acc_nonzero =
+                    bytemuck::cast::<[i16; 8], u128>(acc_arr) != zero_acc_bits;
+
+                if tagged || acc_nonzero {
                     let global_x = (tile_bounds.min_col + col as i32) as u16;
                     let global_y = (tile_bounds.min_row + row as i32) as u16;
 
@@ -206,7 +226,7 @@ impl Builder {
                         width: TILE_W as u8,
                         height: TILE_H as u8,
                         _pad: [0, 0],
-                        backdrop: acc,
+                        backdrop: acc_arr,
                         segments: [
                             f32::from_bits(line_offset),
                             f32::from_bits(line_count),
@@ -219,9 +239,13 @@ impl Builder {
 
                 if tagged {
                     let crossings = covers.get_crossings(row, col);
-                    for s in 0..TILE_H {
-                        acc[s] += crossings[s];
-                    }
+                    // Single i16x8 SIMD add: replaces 8 scalar i16 adds.
+                    dispatch!(self.level, simd => {
+                        let acc_v = i16x8::from_slice(simd, &acc_arr);
+                        let cr_v = i16x8::from_slice(simd, &crossings);
+                        let sum = acc_v + cr_v;
+                        acc_arr = sum.into();
+                    });
                 }
 
                 // ── Per-tile dump for a y-pixel range of interest ──
@@ -235,7 +259,7 @@ impl Builder {
                     let tile_y_lo = global_y * TILE_H as i32;
                     let tile_y_hi = tile_y_lo + TILE_H as i32 - 1;
                     if tile_y_hi >= y_lo && tile_y_lo <= y_hi
-                        && (tagged || acc != [0i16; TILE_H])
+                        && (tagged || acc_nonzero)
                     {
                         let global_x = tile_bounds.min_col + col as i32;
                         let (block_start, block_count) = find_segment_range(
@@ -246,7 +270,7 @@ impl Builder {
                         web_sys::console::log_1(
                             &alloc::format!(
                                 "[TILE-DUMP] tile=({},{}) global_pixel_y=[{}..{}] backdrop={:?} lines={}",
-                                global_x, global_y, tile_y_lo, tile_y_hi, acc, block_count,
+                                global_x, global_y, tile_y_lo, tile_y_hi, acc_arr, block_count,
                             )
                             .into(),
                         );
@@ -278,22 +302,33 @@ impl Builder {
             // which scanlines (within the tile row) leaked. The y-pixel
             // for scanline `s` in tile row `row` is:
             //   y_pixel = (tile_bounds.min_row + row) * TILE_H + s
-            if acc != [0i16; TILE_H] {
+            // ── Row-balance sanity check (debug builds only) ──
+            // After processing every column in this tile row, the running
+            // accumulator MUST be zero on every scanline. A non-zero value
+            // means at least one emitted line on that scanline didn't have
+            // a matching opposite-direction partner — its winding will
+            // streak rightward off the canvas.
+            //
+            // Gated to debug builds because a u128 compare per row is
+            // cheap, but the format/log path on a leak is not, and we
+            // never want this in the per-frame interactive demo.
+            #[cfg(debug_assertions)]
+            if bytemuck::cast::<[i16; 8], u128>(acc_arr) != zero_acc_bits {
                 let global_row = tile_bounds.min_row + row as i32;
                 let mut leaked: alloc::string::String = alloc::string::String::new();
                 for s in 0..TILE_H {
-                    if acc[s] != 0 {
+                    if acc_arr[s] != 0 {
                         let y_pixel = global_row * TILE_H as i32 + s as i32;
                         leaked.push_str(&alloc::format!(
                             " [row_in_tile={} y_pixel={} residual={}]",
-                            s, y_pixel, acc[s],
+                            s, y_pixel, acc_arr[s],
                         ));
                     }
                 }
                 web_sys::console::log_1(
                     &alloc::format!(
                         "[ROW-BALANCE LEAK] tile_row={} (global_row={}) acc={:?} leaked:{}",
-                        row, global_row, acc, leaked,
+                        row, global_row, acc_arr, leaked,
                     )
                     .into(),
                 );
@@ -305,6 +340,9 @@ impl Builder {
         self.tiles.clear();
         self.segments.clear();
         self.blocks.reset();
+        // Reset depth counter so Scene::reset() (used per frame for the
+        // interactive demo) doesn't grow depth_index unboundedly across frames.
+        self.shape_index = 0;
     }
 }
 

@@ -1,10 +1,25 @@
-[build]
-target = "wasm32-unknown-unknown"
 
+# When you build for wasm, enable the SIMD128 feature so fearless_simd's
+# wasm backend lights up. simd128 is required for the i16x8 / f32x4 / f32x8
+# operations we use in the rasterizer hot path.
+#
+# Other features previously listed here (`+atomics`, `+bulk-memory`,
+# `+mutable-globals`) and `build-std` are needed only for wasm-bindgen-rayon
+# (the optional `multithreading` feature). Keeping them on globally would
+# force every wasm build into nightly `-Z build-std`, so we leave them off
+# here. Re-enable per-build with `RUSTFLAGS=...` when you actually want
+# threads.
 [target.wasm32-unknown-unknown]
 rustflags = [
-    "-C", "target-feature=+simd128,+atomics,+bulk-memory,+mutable-globals",
+    "-C", "target-feature=+simd128",
 ]
 
-[unstable]
-build-std = ["panic_abort", "std"]
+# `cargo run_wasm -p native_webgl --release` runs the interactive demo as a
+# real wasm-bindgen cdylib (release-tuned, no test harness). This is the
+# fast path we use for measuring real performance — `wasm-pack test
+# --release` adds 3–5× harness overhead on top of the same code.
+#
+# Mirrors the alias used by vello_hybrid.
+[alias]
+run_wasm = "run --release --package run_wasm --"
+run-wasm = "run_wasm"

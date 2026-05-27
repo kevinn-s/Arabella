@@ -80,29 +80,80 @@ int read_backdrop(int row) {
 }
 
 // ---------------------------------------------------------------------------
-// Line→ray winding contribution
+// Analytic line-area contribution (BOX filter, radius 0.5)
 //
-// Returns ±1 if the horizontal ray going right from `pixel` crosses the line.
-// Sign matches the CPU-side rule used in `record_per_scanline_crossings`:
-//   line going DOWN  (p0.y < p1.y) → -1
-//   line going UP    (p0.y > p1.y) → +1
-// Half-open Y interval [y_min, y_max) matches the CPU side exactly.
+// Returns the signed fraction of the unit-pixel box that lies "to the right"
+// of the line within the line's y-range, scaled by the line's winding sign.
+// Result is in [-1, +1]. This is the convolution of the line's half-plane
+// indicator with a 1×1 box filter centered at `pixel`.
 // ---------------------------------------------------------------------------
-
-float line_contribution(vec2 p0, vec2 p1, vec2 pixel) {
+float line_box(vec2 p0, vec2 p1, vec2 pixel) {
     if (p0.y == p1.y) return 0.0;
 
-    float sign_v = (p0.y < p1.y) ? -1.0 : 1.0;
-    float y_min  = min(p0.y, p1.y);
-    float y_max  = max(p0.y, p1.y);
+    float sign_v;
+    vec2 lo, hi;
+    if (p0.y < p1.y) { sign_v = -1.0; lo = p0; hi = p1; }
+    else             { sign_v = +1.0; lo = p1; hi = p0; }
 
-    if (pixel.y <  y_min) return 0.0;
-    if (pixel.y >= y_max) return 0.0;
+    // Clip the line's y-range to the pixel's box y-extent [pixel.y ± 0.5].
+    float py_lo = pixel.y - 0.5;
+    float py_hi = pixel.y + 0.5;
+    float y_lo  = max(lo.y, py_lo);
+    float y_hi  = min(hi.y, py_hi);
+    if (y_hi <= y_lo) return 0.0;
 
-    float t      = (pixel.y - p0.y) / (p1.y - p0.y);
-    float x_at_t = mix(p0.x, p1.x, t);
+    // x-coordinates of the clipped sub-segment's endpoints.
+    float dy   = hi.y - lo.y;
+    float t_lo = (y_lo - lo.y) / dy;
+    float t_hi = (y_hi - lo.y) / dy;
+    float x_lo = mix(lo.x, hi.x, t_lo);
+    float x_hi = mix(lo.x, hi.x, t_hi);
 
-    return (pixel.x >= x_at_t) ? sign_v : 0.0;
+    // Trapezoidal area of the pixel-box region to the RIGHT of the line.
+    float px_lo = pixel.x - 0.5;
+    float px_hi = pixel.x + 0.5;
+    float xc_lo = clamp(x_lo, px_lo, px_hi);
+    float xc_hi = clamp(x_hi, px_lo, px_hi);
+    float avg_x = (xc_lo + xc_hi) * 0.5;
+    float h_cov = px_hi - avg_x;
+
+    return sign_v * (y_hi - y_lo) * h_cov;
+}
+
+// ---------------------------------------------------------------------------
+// Tent-filter line contribution (TENSOR TENT, radius 1)
+//
+// The 2D tensor tent has support 2×2 pixels: it extends 1 pixel above, below,
+// left, and right of the pixel center, with weight tapering linearly to zero
+// at the edges. Mathematically:
+//
+//     tent(s) = max(1 - |s|, 0)
+//     h(x, y) = tent(x - px) · tent(y - py)
+//
+// We approximate the tent in y as a 5-sample weighted sum {0.04, 0.24, 0.44,
+// 0.24, 0.04} at offsets {-0.8, -0.4, 0, +0.4, +0.8}, while keeping the
+// x-direction analytic (using `line_box` at each y-sample). This is *not*
+// the paper's full closed-form tent integral — that's a piecewise-polynomial
+// sub-interval integration ~80 lines of GLSL — but it captures the tent's
+// y-falloff with O(5×) the cost of `line_box`.
+//
+// !! IMPORTANT: this filter has radius 1 in y, so a pixel at the bottom of
+// !! a tile reads samples up to +0.8 below itself — which can lie in the
+// !! NEXT tile down. Without halo binning, lines from that neighbor tile
+// !! are missing from `seg_count`, producing visible seams on tile bottom
+// !! and top rows. That seam is exactly what this experiment is meant to
+// !! reveal.
+// ---------------------------------------------------------------------------
+
+float line_tent(vec2 p0, vec2 p1, vec2 pixel) {
+    // Discrete tent kernel (sampled in y, analytic in x).
+    // Weights normalized so the sum equals 1.0.
+    return
+        0.04 * line_box(p0, p1, pixel + vec2(0.0, -0.8)) +
+        0.24 * line_box(p0, p1, pixel + vec2(0.0, -0.4)) +
+        0.44 * line_box(p0, p1, pixel) +
+        0.24 * line_box(p0, p1, pixel + vec2(0.0, +0.4)) +
+        0.04 * line_box(p0, p1, pixel + vec2(0.0, +0.8));
 }
 
 // ---------------------------------------------------------------------------
@@ -145,23 +196,27 @@ void main() {
     float winding  = backdrop;
 
     // ── Add this tile's per-line contributions ──
+    // Switching `line_box` ↔ `line_tent` here selects the AA filter:
+    //   - line_box  : 1×1 support, sharp, no neighbor dependency.
+    //   - line_tent : 2×2 support, softer, REQUIRES halo binning to be
+    //                 artifact-free (we don't have it yet — see seams).
     for (uint s = 0u; s < seg_count; s++) {
         uint line_idx = seg_offset + s;
         vec2 p0, p1;
         read_line(line_idx, p0, p1);
-        winding += line_contribution(p0, p1, pixel);
+        winding += line_box(p0, p1, pixel);
     }
 
-    // ── Fill rule ──
+    // ── Fill rule → coverage ──
+    // The winding is now a continuous value, so the threshold becomes a clamp.
     float coverage;
     if (fill_rule == FILL_RULE_NONZERO) {
-        // Inside if winding ≠ 0.  Use a comfortably-low threshold to absorb
-        // any 8.8 quantization noise (½ unit = ~0.002 in winding space).
-        coverage = (abs(winding) > 0.5) ? 1.0 : 0.0;
+        // Inside if winding ≠ 0; coverage scales with how "full" the pixel is.
+        coverage = clamp(abs(winding), 0.0, 1.0);
     } else {
-        // EvenOdd: round to nearest int and check parity.
-        int w = int(floor(abs(winding) + 0.5));
-        coverage = ((w & 1) == 1) ? 1.0 : 0.0;
+        // EvenOdd: triangle-wave on |winding| → 0 at evens, 1 at odds.
+        float w = abs(winding);
+        coverage = 1.0 - abs(mod(w, 2.0) - 1.0);
     }
 
     if (coverage <= 0.0) {

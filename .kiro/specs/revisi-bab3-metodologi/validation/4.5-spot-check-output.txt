@@ -1,0 +1,54 @@
+Cargo.toml:   7  >  edition = "2024"
+Cargo.toml:  26  >  targets = ["wasm32-unknown-unknown"]
+Cargo.toml:  48  >  [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+Cargo.toml:  49  >  rayon = { version = "1.11.0", optional = true }
+Cargo.toml:  50  >  thread_local = { version = "1.1.9", optional = true }
+Cargo.toml:  94  >  multithreading = ["std", "dep:rayon", "dep:thread_local"]
+src/blocks.rs:   6  >  pub const TILE_W: usize = 16;
+src/blocks.rs:   7  >  pub const TILE_H: usize = 8;
+src/blocks.rs:  10  >  pub const TILE_W_F24DOT8: i32 = (TILE_W as i32) << 8;  // 4096
+src/blocks.rs:  11  >  pub const TILE_H_F24DOT8: i32 = (TILE_H as i32) << 8;  // 2048
+src/blocks.rs:  93  >      pub fn build_block(
+src/blocks.rs: 107  >      pub fn bin_line(
+src/blocks.rs: 710  >  fn record_per_scanline_crossings(crossings: &mut [i16; TILE_H], y0: i32, y1: i32) {
+src/builder.rs:  17  >  const FILL_RULE_SHIFT: u32 = 24;
+src/builder.rs:  28  >  const FILL_RULE_NONZERO: u32 = 0;
+src/builder.rs:  29  >  const FILL_RULE_EVENODD: u32 = 1;
+src/builder.rs:  84  >      pub fn build_path(
+src/builder.rs: 151  >      pub fn generate_tiles(
+src/render/shaders/render_tile.frag:  24  >  #define WINDING_UNIT                     256.0
+src/render/shaders/render_tile.frag:  90  >  float line_box(vec2 p0, vec2 p1, vec2 pixel) {
+src/render/shaders/render_tile.frag: 215  >          coverage = clamp(abs(winding), 0.0, 1.0);
+src/render/shaders/render_tile.frag: 218  >          float w = abs(winding);
+src/render/shaders/render_tile.frag: 219  >          coverage = 1.0 - abs(mod(w, 2.0) - 1.0);
+src/render/webgl.rs: 271  >      pub fn new(canvas: &HtmlCanvasElement) -> Self {
+src/render/webgl.rs: 296  >      pub fn render(&mut self, scene: &Scene, render_size: &RenderSize) {
+src/render/webgl.rs: 525  >  fn initialize_tile_vao(gl: &WebGl2RenderingContext, resources: &WebGlResources) {
+src/render/webgl.rs: 529  >      let stride = core::mem::size_of::<Tile>() as i32; // Automatically handles the size expansion
+src/scene.rs:  70  >      pub fn fill<'b>(
+src/scene.rs: 117  >      pub fn stroke<'b>(
+src/scene.rs: 158  >          self.fill(&lyon_out, FillRule::NonZero, transform, brush);
+src/scene.rs: 165  >      pub fn tiles(&self) -> &[Tile] {
+src/tile.rs:   9  >  #[repr(C)]
+src/tile.rs:  23  >  
+src/pico_svg.rs:  84  >      pub fn load(xml_string: &str, scale: f64) -> Result<Self, Box<dyn core::error::Error>> {
+src/pico_svg.rs: 191  >              match node.tag_name().name() {
+tests/test.rs: 147  >  async fn test_renders_tiger_svg() {
+tests/test.rs: 151  >      const W: u16 = 1080;
+tests/test.rs: 152  >      const H: u16 = 520;
+examples/native_webgl/src/main.rs:  22  >          let window = web_sys::window().unwrap();
+examples/native_webgl/src/main.rs:  27  >          let height = (inner_h * dpr) as u16;
+examples/native_webgl/src/lib.rs: 316  >      fn update_overlay(&self) {
+examples/native_webgl/src/lib.rs: 325  >          let scale_x = self.view.m11.hypot(self.view.m12);
+examples/native_webgl/src/lib.rs: 335  >              self.last_cpu_ms,
+examples/native_webgl/src/lib.rs: 336  >              self.last_gpu_ms,
+examples/native_webgl/src/lib.rs: 337  >              scale_x,
+examples/native_webgl/src/lib.rs: 338  >              asset.paint_ops.len(),
+examples/native_webgl/src/lib.rs: 341  >      }
+src/path.rs:   7  >  const MAX_QUADS: usize = 16;
+src/path.rs: 352  >  fn estimate_number_of_quadratic_curves(
+src/path.rs: 391  >  fn convert_cubics_to_quadratic_curves<S: Simd>(
+src/flatten.rs:  18  >  const FLATNESS_THRESHOLD: i32 = 32;
+src/flatten.rs:  20  >  pub fn flatten_quadratic<F>(
+src/flatten.rs:  31  >  fn flatten_recursive<F>(
+src/flatten.rs:  62  >  /// Computes L1 distance from the midpoint of the chord (p0→p2) to the

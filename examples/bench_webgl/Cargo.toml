@@ -1,0 +1,46 @@
+[package]
+name = "bench_webgl"
+version = "0.1.0"
+description = "Deterministic, reproducible Arabella performance benchmark (fixed 1080x520, three assets, warm-up + N-frame average)."
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+# Built as a wasm-bindgen cdylib and served via
+# `cargo run_wasm -p bench_webgl --release`. Release tuning from the root
+# `[profile.release]` (lto = "fat", codegen-units = 1) applies, so the
+# numbers reflect a properly inlined build rather than the 3-5x slower
+# wasm-bindgen-test harness.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pull arabella from the workspace root with the WebGL backend.
+arabella = { path = "../..", features = ["webgl"] }
+
+console_error_panic_hook = "0.1"
+console_log = "1.0"
+log = "0.4.29"
+
+js-sys = "0.3.91"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4.71"
+web-sys = { version = "0.3.91", features = [
+    "console",
+    "Navigator",
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CssStyleDeclaration",
+    "WebGl2RenderingContext",
+    "WebGlQuery",
+    "Performance",
+] }
+
+# Geometry / scene types used to collect paint ops.
+lyon_geom = "1.0.19"
+lyon_path = "1.0.19"
+peniko = { version = "0.6.1", default-features = false, features = ["libm"] }
+kurbo = { version = "0.13.0" }

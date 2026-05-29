@@ -77,6 +77,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "bench_webgl"
+version = "0.1.0"
+dependencies = [
+ "arabella",
+ "console_error_panic_hook",
+ "console_log",
+ "js-sys",
+ "kurbo",
+ "log",
+ "lyon_geom",
+ "lyon_path",
+ "peniko",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

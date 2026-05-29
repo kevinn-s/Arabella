@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Visualisasi Algoritma Arabella</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #181b22;
+    --panel2: #1f232c;
+    --border: #2a2f3a;
+    --text: #e6e8ec;
+    --muted: #9aa3b2;
+    --accent: #5db0ff;
+    --accent2: #7ee787;
+    --warn: #ffb454;
+    --danger: #ff6b6b;
+    --grid: #2a2f3a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.55;
+  }
+  .layout { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 270px; flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    padding: 18px 14px;
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  }
+  .sidebar h1 {
+    font-size: 18px; margin: 4px 6px 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sidebar .sub { font-size: 12px; color: var(--muted); margin: 0 6px 16px; }
+  .nav-item {
+    display: block; padding: 9px 12px; margin: 3px 0;
+    border-radius: 8px; color: var(--text); text-decoration: none;
+    font-size: 14px; cursor: pointer; border: 1px solid transparent;
+    transition: background .15s, border .15s;
+  }
+  .nav-item:hover { background: var(--panel2); }
+  .nav-item.active { background: var(--panel2); border-color: var(--accent); color: var(--accent); }
+  .nav-item .n { color: var(--muted); font-size: 12px; margin-right: 7px; }
+
+  /* Main */
+  .main { flex: 1; padding: 32px 40px 80px; max-width: 1000px; }
+  section.demo { display: none; animation: fade .25s ease; }
+  section.demo.active { display: block; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px);} to {opacity:1; transform:none;} }
+
+  h2.title { font-size: 26px; margin: 0 0 4px; }
+  .tag { display:inline-block; font-size: 11px; padding: 2px 8px; border-radius: 20px;
+         background: var(--panel2); border:1px solid var(--border); color: var(--muted); margin-bottom: 14px; }
+  .lead { color: var(--muted); font-size: 15px; margin: 0 0 22px; }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+          padding: 18px; margin-bottom: 20px; }
+  .card h3 { margin: 0 0 12px; font-size: 16px; color: var(--accent); }
+
+  canvas { background: #0b0d11; border-radius: 8px; display: block; max-width: 100%; }
+  .canvas-wrap { display:flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 14px 0 4px; }
+  .controls label { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  input[type=range] { width: 180px; accent-color: var(--accent); }
+  button {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px;
+    transition: background .15s, border .15s;
+  }
+  button:hover { background: #2a2f3a; border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #07101c; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.1); }
+
+  .explain { background: var(--panel2); border-left: 3px solid var(--accent); border-radius: 6px;
+             padding: 12px 16px; margin: 14px 0; font-size: 14px; }
+  .explain.green { border-left-color: var(--accent2); }
+  .explain.warn { border-left-color: var(--warn); }
+  .analogy { font-size: 14px; color: var(--warn); }
+  .analogy b { color: var(--warn); }
+
+  code { background: #0b0d11; padding: 2px 6px; border-radius: 4px; font-size: 13px; color: var(--accent2);
+         font-family: ui-monospace, Menlo, Consolas, monospace; }
+  pre { background: #0b0d11; border: 1px solid var(--border); border-radius: 8px; padding: 14px;
+        overflow-x: auto; font-size: 13px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .readout { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; color: var(--accent2); }
+  .pill { display:inline-block; padding: 3px 9px; border-radius: 20px; font-size: 12px;
+          font-family: ui-monospace, monospace; margin: 2px; }
+  .legend { display:flex; gap: 16px; flex-wrap: wrap; font-size: 13px; margin: 10px 0; color: var(--muted); }
+  .legend span { display:flex; align-items:center; gap:6px; }
+  .swatch { width: 14px; height: 14px; border-radius: 3px; display:inline-block; }
+  table.data { border-collapse: collapse; width: 100%; font-size: 13px; margin: 10px 0; }
+  table.data th, table.data td { border: 1px solid var(--border); padding: 6px 10px; text-align: center; }
+  table.data th { background: var(--panel2); color: var(--muted); }
+  .stepbar { display:flex; gap: 8px; align-items:center; margin: 10px 0; flex-wrap: wrap; }
+  .muted { color: var(--muted); }
+  .kbd { font-family: monospace; background:#0b0d11; border:1px solid var(--border); border-radius:4px; padding:1px 6px; }
+  .flow { display:flex; flex-direction: column; gap: 0; }
+  .flow .stage { display:flex; align-items:center; gap: 14px; padding: 10px 14px; border:1px solid var(--border);
+                 border-radius: 10px; margin: 4px 0; background: var(--panel); cursor: pointer; transition: .15s; }
+  .flow .stage:hover { border-color: var(--accent); background: var(--panel2); }
+  .flow .stage.cpu { border-left: 4px solid var(--accent); }
+  .flow .stage.gpu { border-left: 4px solid var(--accent2); }
+  .flow .stage .num { font-family: monospace; color: var(--muted); width: 26px; }
+  .flow .stage .lbl b { font-size: 15px; }
+  .flow .stage .lbl div { font-size: 13px; color: var(--muted); }
+  .flow .arrow { text-align:center; color: var(--muted); font-size: 18px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <h1>Arabella</h1>
+    <div class="sub">Visualisasi Algoritma Renderer Hibrida CPU/GPU</div>
+    <nav id="nav"></nav>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+//  Kerangka navigasi & utilitas umum
+// ════════════════════════════════════════════════════════════════════════
+const DEMOS = [
+  { id: "overview",  title: "Gambaran Pipeline" },
+  { id: "flatten",   title: "Flattening Kurva" },
+  { id: "cubic",     title: "Kubik → Kuadratik" },
+  { id: "dda",       title: "DDA Tile Binning" },
+  { id: "winding",   title: "Winding Per-Scanline" },
+  { id: "backdrop",  title: "Propagasi Backdrop" },
+  { id: "linebox",   title: "Coverage GPU (line_box)" },
+  { id: "fillrule",  title: "Fill Rule" },
+];
+
+const nav = document.getElementById("nav");
+const main = document.getElementById("main");
+
+DEMOS.forEach((d, i) => {
+  const a = document.createElement("a");
+  a.className = "nav-item";
+  a.dataset.id = d.id;
+  a.innerHTML = `<span class="n">${String(i).padStart(2,"0")}</span>${d.title}`;
+  a.onclick = () => show(d.id);
+  nav.appendChild(a);
+
+  const sec = document.createElement("section");
+  sec.className = "demo";
+  sec.id = "demo-" + d.id;
+  main.appendChild(sec);
+});
+
+function show(id) {
+  document.querySelectorAll(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.id === id));
+  document.querySelectorAll("section.demo").forEach(s => s.classList.toggle("active", s.id === "demo-" + id));
+  location.hash = id;
+  window.scrollTo(0, 0);
+}
+
+// Helpers ------------------------------------------------------------------
+function el(html) { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstChild; }
+function hidpi(canvas, w, h) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  canvas.style.width = w + "px"; canvas.style.height = h + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+const lerp = (a, b, t) => a + (b - a) * t;
+const lerpPt = (p, q, t) => ({ x: lerp(p.x, q.x, t), y: lerp(p.y, q.y, t) });
+</script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+//  DEMO 0 — Gambaran Pipeline
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  const root = document.getElementById("demo-overview");
+  root.innerHTML = `
+    <h2 class="title">Gambaran Pipeline Rendering</h2>
+    <div class="tag">Peta besar · klik tiap tahap untuk lompat ke demonya</div>
+    <p class="lead">Arabella mengubah gambar vektor (SVG) menjadi piksel di layar melalui 7 tahap.
+       Tahap <b style="color:var(--accent)">biru = CPU</b> (menyiapkan), tahap
+       <b style="color:var(--accent2)">hijau = GPU</b> (mengeksekusi paralel).</p>
+    <div class="card">
+      <div class="flow" id="flow"></div>
+    </div>
+    <div class="card">
+      <h3>Inti filosofinya</h3>
+      <p class="analogy">🍳 <b>Analogi:</b> CPU itu seperti koki yang menyiapkan & memotong bahan
+      (mise en place), sedangkan GPU seperti barisan ratusan pelayan yang menyajikan semua piring
+      secara serentak. Kalau koki menyiapkan dengan rapi, pelayan bisa bekerja sangat cepat dan paralel.</p>
+      <div class="explain green">Kunci performa: pekerjaan berat per-piksel didorong ke GPU yang
+      memproses ribuan piksel sekaligus, sementara CPU hanya menata geometri sekali di awal.</div>
+    </div>`;
+
+  const stages = [
+    ["1", "cpu", "Parsing SVG", "Teks XML → struktur Fill / Stroke / Group", null],
+    ["2", "cpu", "Flattening", "Kurva Bézier dipecah jadi banyak garis lurus", "flatten"],
+    ["3", "cpu", "DDA Tile Binning", "Tiap garis didaftarkan ke petak 16×8 yang dilewatinya", "dda"],
+    ["4", "cpu", "Winding per-scanline", "Hitung luas bertanda tiap garis di tiap baris piksel", "winding"],
+    ["5", "cpu", "Propagasi backdrop", "Teruskan winding antar petak, kiri → kanan", "backdrop"],
+    ["6", "gpu", "Upload + Instancing", "Kirim tile & segmen ke GPU, gambar semua quad sekaligus", null],
+    ["7", "gpu", "Fragment Shader", "Hitung coverage tiap piksel (line_box) + fill rule", "linebox"],
+  ];
+  const flow = root.querySelector("#flow");
+  stages.forEach((s, i) => {
+    const stage = el(`<div class="stage ${s[1]}">
+        <div class="num">${s[0]}</div>
+        <div class="lbl"><b>${s[2]}</b><div>${s[3]}</div></div>
+        <div style="margin-left:auto;font-size:12px;color:var(--muted)">${s[1].toUpperCase()}</div>
+      </div>`);
+    if (s[4]) stage.onclick = () => show(s[4]);
+    flow.appendChild(stage);
+    if (i < stages.length - 1) flow.appendChild(el(`<div class="arrow">▼</div>`));
+  });
+})();
+</script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+//  DEMO 1 — Flattening Kurva (recursive midpoint subdivision)
+//  Mereplika logika src/flatten.rs : is_flat_enough + flatten_recursive
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  const root = document.getElementById("demo-flatten");
+  root.innerHTML = `
+    <h2 class="title">Flattening Kurva → Garis Lurus</h2>
+    <div class="tag">Sumber: <code>src/flatten.rs</code> · recursive midpoint subdivision (Blaze / De Casteljau)</div>
+    <p class="lead">GPU paling cepat menggambar garis lurus. Maka kurva harus dipecah dulu jadi
+       banyak garis lurus pendek. Geser titik kontrol & ubah ambang kelurusan, lihat bagaimana
+       jumlah garis berubah.</p>
+    <div class="card">
+      <div class="canvas-wrap">
+        <canvas id="fl-cv" width="520" height="380"></canvas>
+        <div style="flex:1; min-width:240px">
+          <div class="controls" style="flex-direction:column; align-items:stretch">
+            <label>Ambang kelurusan (FLATNESS_THRESHOLD): <span id="fl-th-v" class="readout"></span>
+              <input type="range" id="fl-th" min="4" max="256" value="48" step="4"></label>
+            <label>Animasi kedalaman rekursi: <span id="fl-d-v" class="readout"></span>
+              <input type="range" id="fl-d" min="0" max="12" value="12" step="1"></label>
+          </div>
+          <div class="stepbar">
+            <button id="fl-anim" class="primary">▶ Animasikan</button>
+            <button id="fl-rand">🎲 Acak kurva</button>
+          </div>
+          <div class="legend">
+            <span><i class="swatch" style="background:#3a4252"></i> kurva asli (referensi)</span>
+            <span><i class="swatch" style="background:#5db0ff"></i> garis hasil flatten</span>
+            <span><i class="swatch" style="background:#ffb454"></i> titik kontrol (seret)</span>
+          </div>
+          <div class="explain"><b>Garis dihasilkan:</b> <span id="fl-count" class="readout">0</span></div>
+        </div>
+      </div>
+      <div class="explain green">Cara kerja: ukur jarak dari titik tengah tali busur (p0→p2) ke
+        titik kontrol p1. Bila ≤ ambang → cukup lurus, simpan 1 garis. Bila tidak → belah di tengah
+        (De Casteljau), ulangi untuk tiap setengah. Makin kecil ambang → makin banyak garis → makin halus.</div>
+      <p class="analogy">📏 <b>Analogi:</b> mau menggambar lengkungan pakai penggaris. Kalau masih
+        kelihatan bengkok, potong jadi dua dan periksa lagi tiap bagian — sampai tiap potongan tampak lurus.</p>
+    </div>`;
+
+  const cv = root.querySelector("#fl-cv");
+  const ctx = hidpi(cv, 520, 380);
+  let pts = [{x:70,y:300},{x:260,y:40},{x:450,y:300}]; // p0, p1(ctrl), p2
+  let threshold = 48, maxDepth = 12, dragIdx = -1;
+
+  function flatLineSeg(p0,p1,p2,out,depth){
+    // mirror is_flat_enough (L1) + recursion, with depth cap for animation
+    const mx=(p0.x+p2.x)/2, my=(p0.y+p2.y)/2;
+    const dc = Math.abs(mx-p1.x)+Math.abs(my-p1.y);
+    if (dc*2 <= threshold || depth>=maxDepth){ out.push([p0,p2]); return; }
+    const m01=lerpPt(p0,p1,.5), m12=lerpPt(p1,p2,.5), mid=lerpPt(m01,m12,.5);
+    flatLineSeg(p0,m01,mid,out,depth+1);
+    flatLineSeg(mid,m12,p2,out,depth+1);
+  }
+  function trueCurve(p0,p1,p2,n=160){ const a=[]; for(let i=0;i<=n;i++){const t=i/n;
+    a.push(lerpPt(lerpPt(p0,p1,t),lerpPt(p1,p2,t),t));} return a; }
+
+  function draw(){
+    ctx.clearRect(0,0,520,380);
+    const [p0,p1,p2]=pts;
+    // reference curve
+    const tc=trueCurve(p0,p1,p2);
+    ctx.strokeStyle="#3a4252"; ctx.lineWidth=6; ctx.beginPath();
+    tc.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.stroke();
+    // control polygon
+    ctx.strokeStyle="#4a3a20"; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(p0.x,p0.y); ctx.lineTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+    ctx.setLineDash([]);
+    // flattened lines
+    const out=[]; flatLineSeg(p0,p1,p2,out,0);
+    ctx.strokeStyle="#5db0ff"; ctx.lineWidth=2; ctx.beginPath();
+    out.forEach(([a,b])=>{ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);}); ctx.stroke();
+    // vertices
+    ctx.fillStyle="#7ee787";
+    out.forEach(([a,b])=>{ctx.beginPath();ctx.arc(b.x,b.y,2.5,0,7);ctx.fill();});
+    ctx.beginPath();ctx.arc(p0.x,p0.y,3,0,7);ctx.fill();
+    // control handles
+    ["#7ee787","#ffb454","#7ee787"].forEach((c,i)=>{ctx.fillStyle=c;
+      ctx.beginPath();ctx.arc(pts[i].x,pts[i].y,7,0,7);ctx.fill();
+      ctx.fillStyle="#07101c";ctx.font="11px monospace";ctx.textAlign="center";
+      ctx.fillText(i===1?"ctrl":("p"+(i?2:0)),pts[i].x,pts[i].y+4);});
+    root.querySelector("#fl-count").textContent=out.length+" garis";
+  }
+  // interaction
+  cv.addEventListener("mousedown",e=>{const r=cv.getBoundingClientRect();
+    const mx=e.clientX-r.left,my=e.clientY-r.top;
+    dragIdx=pts.findIndex(p=>Math.hypot(p.x-mx,p.y-my)<14);});
+  window.addEventListener("mousemove",e=>{if(dragIdx<0)return;const r=cv.getBoundingClientRect();
+    pts[dragIdx]={x:Math.max(10,Math.min(510,e.clientX-r.left)),y:Math.max(10,Math.min(370,e.clientY-r.top))};draw();});
+  window.addEventListener("mouseup",()=>dragIdx=-1);
+
+  const thEl=root.querySelector("#fl-th"), dEl=root.querySelector("#fl-d");
+  function syncLabels(){root.querySelector("#fl-th-v").textContent=threshold;
+    root.querySelector("#fl-d-v").textContent=maxDepth+" (maks)";}
+  thEl.oninput=()=>{threshold=+thEl.value;syncLabels();draw();};
+  dEl.oninput=()=>{maxDepth=+dEl.value;syncLabels();draw();};
+  root.querySelector("#fl-rand").onclick=()=>{
+    pts=[{x:60+Math.random()*60,y:120+Math.random()*200},
+         {x:180+Math.random()*180,y:20+Math.random()*120},
+         {x:380+Math.random()*80,y:120+Math.random()*200}];draw();};
+  let animId=null;
+  root.querySelector("#fl-anim").onclick=function(){
+    if(animId){clearInterval(animId);animId=null;this.textContent="▶ Animasikan";return;}
+    this.textContent="⏸ Berhenti";maxDepth=0;
+    animId=setInterval(()=>{maxDepth++;dEl.value=maxDepth;syncLabels();draw();
+      if(maxDepth>=12){clearInterval(animId);animId=null;
+        root.querySelector("#fl-anim").textContent="▶ Animasikan";}},420);};
+  syncLabels(); draw();
+})();
+</script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+//  DEMO 2 — Kubik → Kuadratik
+//  Ilustrasi src/path.rs : convert_cubics_to_quadratic_curves + estimate
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  const root = document.getElementById("demo-cubic");
+  root.innerHTML = `
+    <h2 class="title">Kurva Kubik → Beberapa Kuadratik</h2>
+    <div class="tag">Sumber: <code>src/path.rs</code> · estimate_number_of_quadratic_curves + konversi</div>
+    <p class="lead">SVG memakai kurva Bézier <b>kubik</b> (4 titik). Arabella menyederhanakannya
+       jadi beberapa kurva <b>kuadratik</b> (3 titik) yang lebih mudah di-flatten. Makin melengkung
+       kurvanya, makin banyak potongan kuadratik yang dibutuhkan.</p>
+    <div class="card">
+      <div class="canvas-wrap">
+        <canvas id="cu-cv" width="520" height="380"></canvas>
+        <div style="flex:1; min-width:240px">
+          <label style="font-size:13px;color:var(--muted)">Jumlah potongan kuadratik (n): <span id="cu-n-v" class="readout"></span>
+            <input type="range" id="cu-n" min="1" max="8" value="3" step="1" style="width:100%"></label>
+          <div class="stepbar" style="margin-top:10px">
+            <button id="cu-rand">🎲 Acak kurva kubik</button>
+            <button id="cu-auto" class="primary">Otomatis (sesuai kelengkungan)</button>
+          </div>
+          <div class="legend">
+            <span><i class="swatch" style="background:#3a4252"></i> kurva kubik asli</span>
+            <span><i class="swatch" style="background:#7ee787"></i> potongan kuadratik</span>
+          </div>
+          <div class="explain"><b>Estimasi otomatis:</b> <span id="cu-est" class="readout"></span></div>
+        </div>
+      </div>
+      <div class="explain green">Fungsi <code>estimate_number_of_quadratic_curves</code> melihat
+        seberapa jauh titik kontrol kubik "menyimpang" dari bentuk kuadratik. Hasilnya dipakai untuk
+        memilih berapa banyak kuadratik (1–16) supaya error di bawah toleransi. Tiap kuadratik
+        kemudian di-flatten jadi garis (lihat demo sebelumnya).</p></div>
+      <p class="analogy">🛣️ <b>Analogi:</b> jalan berkelok panjang (kubik) dipecah jadi beberapa
+        tikungan sederhana (kuadratik) supaya gampang dijalani — lalu tiap tikungan diluruskan jadi garis.</p>
+    </div>`;
+
+  const cv = root.querySelector("#cu-cv");
+  const ctx = hidpi(cv, 520, 380);
+  let P=[{x:60,y:320},{x:120,y:40},{x:400,y:40},{x:460,y:320}]; // cubic control
+  let n=3, dragIdx=-1;
+  const cubicAt=(t)=>{const a=lerpPt(P[0],P[1],t),b=lerpPt(P[1],P[2],t),c=lerpPt(P[2],P[3],t);
+    const d=lerpPt(a,b,t),e=lerpPt(b,c,t);return lerpPt(d,e,t);};
+
+  function estimateN(){
+    // simplified replica of estimate(): based on control-point divergence
+    const p1x2x=P[1].x*3-P[0].x, p1x2y=P[1].y*3-P[0].y;
+    const p2x2x=P[2].x*3-P[3].x, p2x2y=P[2].y*3-P[3].y;
+    const dx=p2x2x-p1x2x, dy=p2x2y-p1x2y; const err=dx*dx+dy*dy;
+    // map error to count 1..8 (demo scale)
+    return Math.max(1,Math.min(8,Math.round(Math.cbrt(err)/14)));
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,520,380);
+    // original cubic
+    ctx.strokeStyle="#3a4252"; ctx.lineWidth=7; ctx.beginPath();
+    for(let i=0;i<=200;i++){const p=cubicAt(i/200);i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);} ctx.stroke();
+    // control polygon
+    ctx.strokeStyle="#39414f"; ctx.setLineDash([4,4]); ctx.lineWidth=1; ctx.beginPath();
+    ctx.moveTo(P[0].x,P[0].y);P.forEach(p=>ctx.lineTo(p.x,p.y));ctx.stroke();ctx.setLineDash([]);
+    // split cubic into n quadratics: sample on-curve points + midpoint-derived ctrl
+    const cols=["#7ee787","#5db0ff"];
+    for(let i=0;i<n;i++){
+      const t0=i/n, t1=(i+1)/n, tm=(t0+t1)/2;
+      const a=cubicAt(t0), bm=cubicAt(tm), c=cubicAt(t1);
+      // quad control so that quad passes through bm at t=0.5: ctrl = 2*mid - (a+c)/2
+      const ctrl={x:2*bm.x-(a.x+c.x)/2, y:2*bm.y-(a.y+c.y)/2};
+      ctx.strokeStyle=cols[i%2]; ctx.lineWidth=2.4; ctx.beginPath();
+      for(let k=0;k<=40;k++){const t=k/40;const p=lerpPt(lerpPt(a,ctrl,t),lerpPt(ctrl,c,t),t);
+        k?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);} ctx.stroke();
+      // join dots
+      ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(a.x,a.y,3.5,0,7);ctx.fill();
+      // quad ctrl marker
+      ctx.fillStyle="rgba(126,231,135,.5)";ctx.beginPath();ctx.arc(ctrl.x,ctrl.y,3,0,7);ctx.fill();
+    }
+    const last=cubicAt(1);ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(last.x,last.y,3.5,0,7);ctx.fill();
+    // cubic handles
+    P.forEach((p,i)=>{ctx.fillStyle=(i===1||i===2)?"#ffb454":"#7ee787";
+      ctx.beginPath();ctx.arc(p.x,p.y,7,0,7);ctx.fill();
+      ctx.fillStyle="#07101c";ctx.font="10px monospace";ctx.textAlign="center";ctx.fillText("P"+i,p.x,p.y+3.5);});
+    root.querySelector("#cu-n-v").textContent=n+" kuadratik";
+    root.querySelector("#cu-est").textContent="≈ "+estimateN()+" kuadratik direkomendasikan untuk kurva ini";
+  }
+  cv.addEventListener("mousedown",e=>{const r=cv.getBoundingClientRect();
+    const mx=e.clientX-r.left,my=e.clientY-r.top;dragIdx=P.findIndex(p=>Math.hypot(p.x-mx,p.y-my)<14);});
+  window.addEventListener("mousemove",e=>{if(dragIdx<0)return;const r=cv.getBoundingClientRect();
+    P[dragIdx]={x:Math.max(10,Math.min(510,e.clientX-r.left)),y:Math.max(10,Math.min(370,e.clientY-r.top))};draw();});
+  window.addEventListener("mouseup",()=>dragIdx=-1);
+  const nEl=root.querySelector("#cu-n"); nEl.oninput=()=>{n=+nEl.value;draw();};
+  root.querySelector("#cu-rand").onclick=()=>{P=[{x:50,y:200+Math.random()*120},
+    {x:100+Math.random()*120,y:30+Math.random()*120},{x:300+Math.random()*120,y:30+Math.random()*120},
+    {x:470,y:200+Math.random()*120}];draw();};
+  root.querySelector("#cu-auto").onclick=()=>{n=estimateN();nEl.value=n;draw();};
+  draw();
+})();
+</script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+//  DEMO 3 — DDA Tile Binning
+//  Ilustrasi src/blocks.rs : bin_line (outer DDA) + bin_line_in_row (inner)
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  const root = document.getElementById("demo-dda");
+  root.innerHTML = `
+    <h2 class="title">DDA Tile Binning</h2>
+    <div class="tag">Sumber: <code>src/blocks.rs</code> · outer DDA (baris) + inner DDA (kolom), 8 arah</div>
+    <p class="lead">Layar dibagi jadi grid petak (di kode: 16×8 piksel). Tiap garis harus
+       didaftarkan ke petak mana saja yang dilewatinya, lalu dipotong agar pas di tiap petak.
+       Seret kedua ujung garis & lihat petak mana yang "kena".</p>
+    <div class="card">
+      <div class="canvas-wrap">
+        <canvas id="dda-cv" width="560" height="360"></canvas>
+        <div style="flex:1; min-width:230px">
+          <div class="stepbar">
+            <button id="dda-step" class="primary">▶ Telusuri langkah</button>
+            <button id="dda-reset">Tampilkan semua</button>
+          </div>
+          <div class="legend">
+            <span><i class="swatch" style="background:rgba(93,176,255,.25)"></i> petak terdaftar (Block)</span>
+            <span><i class="swatch" style="background:#ffb454"></i> potongan garis lokal</span>
+          </div>
+          <div class="explain"><b>Langkah:</b> <span id="dda-msg" class="readout">garis melewati petak di bawah</span></div>
+          <div class="explain green" style="font-size:13px"><b>Block dihasilkan:</b>
+            <span id="dda-count" class="readout">0</span><br>
+            <span class="muted">Tiap (garis × petak) = 1 Block berisi titik ujung dalam koordinat lokal petak.</span></div>
+        </div>
+      </div>
+      <div class="explain warn"><b>Dua tingkat DDA:</b><br>
+        • <b>Outer DDA</b> (<code>bin_line</code>) memotong garis per <b>baris</b> petak (sumbu Y).<br>
+        • <b>Inner DDA</b> (<code>bin_line_in_row</code>) memotong tiap potongan per <b>kolom</b> petak (sumbu X).<br>
+        Karena garis bisa naik/turun × kiri/kanan, ada 8 varian fungsi (down-right, up-left, dst) — logikanya sama, hanya beda tanda.</div>
+      <p class="analogy">🗺️ <b>Analogi:</b> peta kota dibagi jadi zona kotak. Sebuah jalan melintasi
+        beberapa zona. DDA mencatat potongan jalan di tiap zona, agar tiap zona tahu jalan apa yang lewat.</p>
+    </div>`;
+
+  const cv = root.querySelector("#dda-cv");
+  const ctx = hidpi(cv, 560, 360);
+  const TW=56, TH=45; // tile px on screen (cols x rows): 10 x 8
+  const COLS=10, ROWS=8;
+  let A={x:70,y:300}, B={x:500,y:60}, dragIdx=-1;
+  let stepMode=false, stepN=0;
+
+  // compute crossed tiles + clipped sub-segments (supercover-ish via DDA sampling)
+  function computeBlocks(){
+    const blocks=[]; // {col,row, a:{x,y}, b:{x,y}}
+    // walk param t, detect tile changes, clip at boundaries (demo approximation of DDA)
+    const N=2000; let prev=null, prevTile=null, segStart=A;
+    for(let i=0;i<=N;i++){
+      const t=i/N; const p=lerpPt(A,B,t);
+      const col=Math.floor(p.x/TW), row=Math.floor(p.y/TH);
+      const key=col+","+row;
+      if(prevTile===null){prevTile=key; segStart=p;}
+      else if(key!==prevTile){
+        const [c,r]=prevTile.split(",").map(Number);
+        blocks.push({col:c,row:r,a:segStart,b:prev});
+        segStart=prev; prevTile=key;
+      }
+      prev=p;
+    }
+    if(prevTile){const [c,r]=prevTile.split(",").map(Number);
+      blocks.push({col:c,row:r,a:segStart,b:B});}
+    return blocks.filter(bl=>bl.col>=0&&bl.col<COLS&&bl.row>=0&&bl.row<ROWS);
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,560,360);
+    const blocks=computeBlocks();
+    const visible = stepMode ? blocks.slice(0,stepN) : blocks;
+    // grid
+    ctx.strokeStyle="#2a2f3a"; ctx.lineWidth=1;
+    for(let c=0;c<=COLS;c++){ctx.beginPath();ctx.moveTo(c*TW,0);ctx.lineTo(c*TW,ROWS*TH);ctx.stroke();}
+    for(let r=0;r<=ROWS;r++){ctx.beginPath();ctx.moveTo(0,r*TH);ctx.lineTo(COLS*TW,r*TH);ctx.stroke();}
+    // highlight tiles
+    visible.forEach((bl,i)=>{
+      const isLast = stepMode && i===stepN-1;
+      ctx.fillStyle=isLast?"rgba(255,180,84,.30)":"rgba(93,176,255,.22)";
+      ctx.fillRect(bl.col*TW+1,bl.row*TH+1,TW-2,TH-2);
+    });
+    // line
+    ctx.strokeStyle="#3a4252"; ctx.lineWidth=8; ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.lineTo(B.x,B.y);ctx.stroke();
+    // clipped sub-segments
+    visible.forEach((bl,i)=>{const isLast=stepMode&&i===stepN-1;
+      ctx.strokeStyle=isLast?"#ffb454":"#5db0ff";ctx.lineWidth=isLast?4:2.5;
+      ctx.beginPath();ctx.moveTo(bl.a.x,bl.a.y);ctx.lineTo(bl.b.x,bl.b.y);ctx.stroke();});
+    // endpoints
+    [["A",A],["B",B]].forEach(([n,p])=>{ctx.fillStyle="#7ee787";
+      ctx.beginPath();ctx.arc(p.x,p.y,8,0,7);ctx.fill();
+      ctx.fillStyle="#07101c";ctx.font="11px monospace";ctx.textAlign="center";ctx.fillText(n,p.x,p.y+4);});
+    root.querySelector("#dda-count").textContent=(stepMode?stepN:blocks.length)+" / "+blocks.length+" Block";
+    if(stepMode&&stepN>0&&stepN<=blocks.length){const bl=blocks[stepN-1];
+      root.querySelector("#dda-msg").textContent=`Block #${stepN}: petak (kolom ${bl.col}, baris ${bl.row})`;}
+    else root.querySelector("#dda-msg").textContent="garis melewati "+blocks.length+" petak";
+  }
+  cv.addEventListener("mousedown",e=>{const r=cv.getBoundingClientRect();
+    const mx=e.clientX-r.left,my=e.clientY-r.top;
+    dragIdx=[A,B].findIndex(p=>Math.hypot(p.x-mx,p.y-my)<16);});
+  window.addEventListener("mousemove",e=>{if(dragIdx<0)return;const r=cv.getBoundingClientRect();
+    const p={x:Math.max(4,Math.min(COLS*TW-4,e.clientX-r.left)),y:Math.max(4,Math.min(ROWS*TH-4,e.clientY-r.top))};
+    if(dragIdx===0)A=p;else B=p;stepMode=false;draw();});
+  window.addEventListener("mouseup",()=>dragIdx=-1);
+  root.querySelector("#dda-step").onclick=()=>{const total=computeBlocks().length;
+    if(!stepMode){stepMode=true;stepN=1;}else{stepN++; if(stepN>total){stepMode=false;}}draw();};
+  root.querySelector("#dda-reset").onclick=()=>{stepMode=false;draw();};
+  draw();
+})();
+</script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+//  DEMO 4 — Winding Per-Scanline (signed area accumulator 8.8)
+//  Ilustrasi src/blocks.rs : record_per_scanline_crossings
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  const root = document.getElementById("demo-winding");
+  root.innerHTML = `
+    <h2 class="title">Akumulator Winding Per-Scanline</h2>
+    <div class="tag">Sumber: <code>src/blocks.rs</code> · record_per_scanline_crossings (signed-area 8.8 fixed-point)</div>
+    <p class="lead">Tiap petak punya 8 baris piksel (scanline). Untuk tiap garis, kita catat
+       <b>luas bertanda</b> yang ditutupinya di tiap baris — bukan sekadar "ada/tidak". Garis
+       <b>turun = −</b>, garis <b>naik = +</b>. Nilai disimpan dalam fixed-point: <code>256 = 1 winding penuh</code>.</p>
+    <div class="card">
+      <div class="canvas-wrap">
+        <canvas id="wd-cv" width="360" height="360"></canvas>
+        <div style="flex:1; min-width:260px">
+          <div class="controls">
+            <button id="wd-flip">↕ Balik arah garis</button>
+            <button id="wd-rand">🎲 Acak garis</button>
+          </div>
+          <p class="muted" style="font-size:13px;margin:8px 0">Arah garis sekarang:
+            <b id="wd-dir" class="readout"></b></p>
+          <table class="data" id="wd-tbl">
+            <thead><tr><th>scanline (baris)</th><th>luas tertutup</th><th>nilai (8.8)</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="explain green">Kenapa luas, bukan sekadar hitung silang? Karena GPU melakukan
+        anti-aliasing dengan menyampel sub-piksel. Nilai luas yang halus membuat backdrop "mengalir"
+        konsisten, sehingga tidak muncul garis-garis nyasar (streak) di tepi petak.</div>
+      <p class="analogy">📊 <b>Analogi:</b> alih-alih mencatat "ada garis di baris ini", kita
+        mencatat "garis menutupi 60% tinggi baris ini, arahnya turun" → nilainya −0.6 × 256 ≈ −154.</p>
+    </div>`;
+
+  const cv = root.querySelector("#wd-cv");
+  const ctx = hidpi(cv, 360, 360);
+  const ROWS=8, PAD=30, CELL=(360-2*PAD)/ROWS; // tile drawn as 8 rows
+  let A={x:90,y:50}, B={x:250,y:300}, dragIdx=-1;
+
+  function compute(){
+    // replicate record_per_scanline_crossings: per row, signed area in [-256,256]
+    const rows=new Array(ROWS).fill(0);
+    let y0=(A.y-PAD)/CELL*256, y1=(B.y-PAD)/CELL*256; // to 8.8 within tile rows
+    const sign = y0<y1 ? -1 : 1; // down=-1, up=+1
+    let yt=Math.min(y0,y1), yb=Math.max(y0,y1);
+    yt=Math.max(0,Math.min(ROWS*256,yt)); yb=Math.max(0,Math.min(ROWS*256,yb));
+    if(Math.abs(yb-yt)<1) return {rows,sign};
+    let rt=Math.min(ROWS-1,Math.floor(yt/256)), rb=Math.min(ROWS-1,Math.floor((yb-1)/256));
+    const fy0=yt-rt*256, fy1=yb-rb*256;
+    if(rt===rb){ rows[rt]=(yb-yt)*sign; }
+    else{
+      rows[rt]=(256-fy0)*sign;
+      for(let r=rt+1;r<rb;r++) rows[r]=256*sign;
+      rows[rb]=fy1*sign;
+    }
+    return {rows,sign};
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,360,360);
+    const {rows,sign}=compute();
+    // bars (signed area) behind grid
+    for(let r=0;r<ROWS;r++){
+      const v=rows[r]/256; // -1..1
+      const y=PAD+r*CELL;
+      if(Math.abs(v)>0.001){
+        ctx.fillStyle=v<0?"rgba(255,107,107,.30)":"rgba(126,231,135,.30)";
+        const w=Math.abs(v)*(360-2*PAD);
+        ctx.fillRect(PAD,y, w, CELL);
+      }
+    }
+    // grid rows
+    ctx.strokeStyle="#2a2f3a"; ctx.lineWidth=1;
+    for(let r=0;r<=ROWS;r++){const y=PAD+r*CELL;ctx.beginPath();ctx.moveTo(PAD,y);ctx.lineTo(360-PAD,y);ctx.stroke();}
+    ctx.strokeRect(PAD,PAD,360-2*PAD,ROWS*CELL);
+    // row labels
+    ctx.fillStyle="#9aa3b2";ctx.font="10px monospace";ctx.textAlign="right";
+    for(let r=0;r<ROWS;r++)ctx.fillText(r,PAD-6,PAD+r*CELL+CELL/2+3);
+    // the line with arrow
+    ctx.strokeStyle=sign<0?"#ff6b6b":"#7ee787";ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.lineTo(B.x,B.y);ctx.stroke();
+    // arrowhead at B
+    const ang=Math.atan2(B.y-A.y,B.x-A.x);ctx.fillStyle=sign<0?"#ff6b6b":"#7ee787";
+    ctx.beginPath();ctx.moveTo(B.x,B.y);
+    ctx.lineTo(B.x-12*Math.cos(ang-.4),B.y-12*Math.sin(ang-.4));
+    ctx.lineTo(B.x-12*Math.cos(ang+.4),B.y-12*Math.sin(ang+.4));ctx.closePath();ctx.fill();
+    // endpoints
+    [A,B].forEach(p=>{ctx.fillStyle="#ffb454";ctx.beginPath();ctx.arc(p.x,p.y,7,0,7);ctx.fill();});
+    // table
+    const tb=root.querySelector("#wd-tbl tbody");tb.innerHTML="";
+    rows.forEach((v,r)=>{const pct=(v/256*100).toFixed(0);
+      const tr=el(`<tr><td>${r}</td><td>${pct}%</td>
+        <td style="color:${v<0?'#ff6b6b':(v>0?'#7ee787':'#9aa3b2')}">${Math.round(v)}</td></tr>`);
+      tb.appendChild(tr);});
+    root.querySelector("#wd-dir").textContent = sign<0 ? "TURUN (−)" : "NAIK (+)";
+    root.querySelector("#wd-dir").style.color = sign<0 ? "#ff6b6b" : "#7ee787";
+  }
+  cv.addEventListener("mousedown",e=>{const r=cv.getBoundingClientRect();
+    const mx=e.clientX-r.left,my=e.clientY-r.top;dragIdx=[A,B].findIndex(p=>Math.hypot(p.x-mx,p.y-my)<14);});
+  window.addEventListener("mousemove",e=>{if(dragIdx<0)return;const r=cv.getBoundingClientRect();
+    const p={x:Math.max(PAD,Math.min(360-PAD,e.clientX-r.left)),y:Math.max(PAD,Math.min(360-PAD,e.clientY-r.top))};
+    if(dragIdx===0)A=p;else B=p;draw();});
+  window.addEventListener("mouseup",()=>dragIdx=-1);
+  root.querySelector("#wd-flip").onclick=()=>{const t=A;A=B;B=t;draw();};
+  root.querySelector("#wd-rand").onclick=()=>{A={x:PAD+Math.random()*(300-2*PAD)+20,y:PAD+Math.random()*40};
+    B={x:PAD+Math.random()*(300-2*PAD)+20,y:300-Math.random()*40};draw();};
+  draw();
+})();
+</script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+//  DEMO 5 — Propagasi Backdrop kiri → kanan
+//  Ilustrasi src/builder.rs : generate_tiles (acc berjalan per baris)
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  const root = document.getElementById("demo-backdrop");
+  root.innerHTML = `
+    <h2 class="title">Propagasi Backdrop (Kiri → Kanan)</h2>
+    <div class="tag">Sumber: <code>src/builder.rs</code> · generate_tiles, akumulator per baris petak</div>
+    <p class="lead">Dalam satu baris petak, ada akumulator winding yang berjalan dari kiri ke kanan.
+       Nilainya (<b>backdrop</b>) memberi tahu tiap petak: "winding sebelum kamu sekian". Inilah cara
+       petak <b>interior</b> (tanpa garis sama sekali) tahu bahwa ia ada di dalam bentuk dan harus diisi penuh.</p>
+    <div class="card">
+      <canvas id="bd-cv" width="820" height="200"></canvas>
+      <div class="stepbar" style="margin-top:12px">
+        <button id="bd-step" class="primary">▶ Maju satu petak</button>
+        <button id="bd-auto">⏩ Jalankan otomatis</button>
+        <button id="bd-reset">↺ Reset</button>
+      </div>
+      <div class="explain"><b>Petak ke-<span id="bd-i" class="readout">0</span>:</b>
+        <span id="bd-msg" class="readout">tekan "Maju" untuk mulai</span></div>
+      <div class="legend">
+        <span><i class="swatch" style="background:rgba(126,231,135,.3)"></i> di dalam bentuk (winding ≠ 0)</span>
+        <span><i class="swatch" style="background:rgba(255,180,84,.4)"></i> petak punya garis tepi</span>
+        <span><i class="swatch" style="background:#0b0d11;border:1px solid #2a2f3a"></i> di luar (winding = 0)</span>
+      </div>
+      <div class="explain green">Rumusnya sederhana: <code>backdrop_petak = akumulasi_sebelumnya</code>,
+        lalu <code>akumulasi += crossings_petak_ini</code>, diteruskan ke kanan. Petak yang backdrop-nya
+        ≠ 0 tetap diisi walau tak punya garis — itulah bagian dalam bentuk.</div>
+      <p class="analogy">🏦 <b>Analogi:</b> seperti saldo rekening. Backdrop = saldo awal hari ini
+        (warisan kemarin). Crossings = transaksi hari ini. Saldo akhir diteruskan ke hari (petak) berikutnya.</p>
+    </div>`;
+
+  const cv = root.querySelector("#bd-cv");
+  const ctx = hidpi(cv, 820, 200);
+  // one row of tiles; each tile has a "crossing" contribution (entering/leaving a shape)
+  // example: shape covers tiles 2..7 → +1 at tile2 (enter), -1 at tile8 (leave)
+  const N=10, TW=78, TY=50, TH=90;
+  // crossings[i] = winding change contributed at tile i
+  const crossings=[0,0,+1,0,0,0,0,0,-1,0];
+  let cur=-1, autoId=null;
+
+  function draw(){
+    ctx.clearRect(0,0,820,200);
+    let acc=0;
+    for(let i=0;i<N;i++){
+      const x=10+i*TW;
+      const backdrop=acc; // backdrop BEFORE adding this tile's crossing
+      const inside = (i<=cur) ? (backdrop!==0) : false;
+      const processed = i<=cur;
+      // fill
+      if(processed && inside){ctx.fillStyle="rgba(126,231,135,.30)";ctx.fillRect(x,TY,TW-3,TH);}
+      if(crossings[i]!==0){ctx.fillStyle="rgba(255,180,84,.40)";ctx.fillRect(x,TY,TW-3,TH);}
+      // current highlight
+      if(i===cur){ctx.strokeStyle="#5db0ff";ctx.lineWidth=3;ctx.strokeRect(x,TY,TW-3,TH);}
+      else{ctx.strokeStyle="#2a2f3a";ctx.lineWidth=1;ctx.strokeRect(x,TY,TW-3,TH);}
+      // labels
+      ctx.fillStyle="#9aa3b2";ctx.font="11px monospace";ctx.textAlign="center";
+      ctx.fillText("petak "+i,x+TW/2,TY-8);
+      if(processed){
+        ctx.fillStyle="#e6e8ec";ctx.font="bold 13px monospace";
+        ctx.fillText("bd="+backdrop,x+TW/2-1,TY+TH/2-4);
+        if(crossings[i]!==0){ctx.fillStyle=crossings[i]>0?"#7ee787":"#ff6b6b";
+          ctx.font="11px monospace";ctx.fillText((crossings[i]>0?"+":"")+crossings[i]+" tepi",x+TW/2,TY+TH/2+16);}
+        else if(inside){ctx.fillStyle="#7ee787";ctx.font="10px monospace";ctx.fillText("ISI",x+TW/2,TY+TH/2+16);}
+      }
+      if(i<=cur) acc+=crossings[i];
+    }
+    // running accumulator arrow
+    ctx.fillStyle="#5db0ff";ctx.font="12px monospace";ctx.textAlign="left";
+    ctx.fillText("akumulasi berjalan →",12,180);
+    root.querySelector("#bd-i").textContent=cur<0?"–":cur;
+    if(cur<0)root.querySelector("#bd-msg").textContent='tekan "Maju" untuk mulai';
+    else{
+      let a=0;for(let i=0;i<cur;i++)a+=crossings[i];
+      const ins=a!==0;
+      root.querySelector("#bd-msg").textContent=
+        `backdrop masuk = ${a} → ${ins?"DI DALAM bentuk, isi penuh":"di luar, kosong"}`+
+        (crossings[cur]!==0?` · ada garis tepi (${crossings[cur]>0?"+":""}${crossings[cur]})`:"");
+    }
+  }
+  root.querySelector("#bd-step").onclick=()=>{if(cur<N-1)cur++;draw();};
+  root.querySelector("#bd-reset").onclick=()=>{cur=-1;if(autoId){clearInterval(autoId);autoId=null;}draw();};
+  root.querySelector("#bd-auto").onclick=function(){
+    if(autoId){clearInterval(autoId);autoId=null;this.textContent="⏩ Jalankan otomatis";return;}
+    this.textContent="⏸ Berhenti";cur=-1;
+    autoId=setInterval(()=>{if(cur<N-1){cur++;draw();}else{clearInterval(autoId);autoId=null;
+      root.querySelector("#bd-auto").textContent="⏩ Jalankan otomatis";}},700);};
+  draw();
+})();
+</script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+//  DEMO 6 — Coverage GPU (line_box) : integral trapesium per piksel
+//  Ilustrasi src/render/shaders/render_tile.frag : line_box()
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  const root = document.getElementById("demo-linebox");
+  root.innerHTML = `
+    <h2 class="title">Coverage Piksel di GPU — <code>line_box</code></h2>
+    <div class="tag">Sumber: <code>src/render/shaders/render_tile.frag</code> · integral trapesium 1×1 (anti-aliasing analitik)</div>
+    <p class="lead">Di GPU, tiap piksel adalah kotak 1×1. Sebuah garis melintasinya. Daripada bertanya
+       "pusat piksel di dalam atau di luar?" (tepi bergerigi), <code>line_box</code> menghitung
+       <b>berapa persen kotak yang tertutup garis</b> → menghasilkan tepi yang halus (anti-aliased).</p>
+    <div class="card">
+      <div class="canvas-wrap">
+        <canvas id="lb-cv" width="380" height="380"></canvas>
+        <div style="flex:1; min-width:250px">
+          <p class="muted" style="font-size:13px">Seret garis (titik kuning). Tiap kotak menampilkan
+             nilai coverage 0..1 yang dihitung <code>line_box</code>.</p>
+          <div class="controls">
+            <label><input type="checkbox" id="lb-num" checked> tampilkan angka coverage</label>
+          </div>
+          <div class="controls">
+            <button id="lb-cmp" class="primary">Bandingkan: bergerigi vs halus</button>
+          </div>
+          <div class="explain" id="lb-mode">Mode: <b>line_box (halus / anti-aliased)</b></div>
+          <div class="legend">
+            <span><i class="swatch" style="background:rgba(93,176,255,.9)"></i> tertutup penuh (≈1)</span>
+            <span><i class="swatch" style="background:rgba(93,176,255,.35)"></i> tertutup sebagian</span>
+          </div>
+        </div>
+      </div>
+      <div class="explain green">Inti idenya: untuk tiap piksel, ambil bagian garis yang berada
+        dalam rentang-y piksel, lalu hitung luas kotak yang ada di sebelah <b>kanan</b> garis.
+        Luas itu = coverage. Kalau garis lewat persis di tengah piksel → coverage ≈ 0.5.</div>
+      <p class="analogy">🖌️ <b>Analogi:</b> seperti menilai "seberapa basah" tiap ubin saat air
+        meluap melewati garis. Ubin yang separuh terkena air dapat nilai 0,5 — bukan cuma "basah/kering".</p>
+    </div>`;
+
+  const cv = root.querySelector("#lb-cv");
+  const ctx = hidpi(cv, 380, 380);
+  const G=10, CELL=36, OX=10, OY=10; // 10x10 pixel grid
+  let A={x:60,y:40}, B={x:300,y:340}, dragIdx=-1, smooth=true, showNum=true;
+
+  // replicate line_box: signed coverage of unit box to the RIGHT of the line in [-1,1]
+  function lineBox(p0,p1,px,py){
+    if(p0.y===p1.y)return 0;
+    let lo,hi,sign;
+    if(p0.y<p1.y){sign=-1;lo=p0;hi=p1;}else{sign=1;lo=p1;hi=p0;}
+    const pyl=py-0.5, pyh=py+0.5;
+    const yl=Math.max(lo.y,pyl), yh=Math.min(hi.y,pyh);
+    if(yh<=yl)return 0;
+    const dy=hi.y-lo.y;
+    const xl=lerp(lo.x,hi.x,(yl-lo.y)/dy);
+    const xh=lerp(lo.x,hi.x,(yh-lo.y)/dy);
+    const pxl=px-0.5, pxh=px+0.5;
+    const cl=Math.max(pxl,Math.min(pxh,xl)), ch=Math.max(pxl,Math.min(pxh,xh));
+    const avg=(cl+ch)/2;
+    const h=pxh-avg;
+    return sign*(yh-yl)*h;
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,380,380);
+    // convert line endpoints into "pixel units" matching grid
+    const a={x:(A.x-OX)/CELL, y:(A.y-OY)/CELL}, b={x:(B.x-OX)/CELL, y:(B.y-OY)/CELL};
+    for(let gy=0;gy<G;gy++)for(let gx=0;gx<G;gx++){
+      const cxp=gx+0.5, cyp=gy+0.5;
+      let cov;
+      if(smooth){
+        cov=Math.abs(lineBox(a,b,cxp,cyp));
+        // also approximate "inside" fill to the right via winding-ish accumulation
+        cov=Math.min(1,cov);
+      } else {
+        // aliased: sample center only — inside if to the right of line within y-range
+        cov = pointInsideHalf(a,b,cxp,cyp)?1:0;
+      }
+      const x=OX+gx*CELL, y=OY+gy*CELL;
+      ctx.fillStyle=`rgba(93,176,255,${0.15+cov*0.75})`;
+      if(cov>0.001)ctx.fillRect(x+1,y+1,CELL-2,CELL-2);
+      ctx.strokeStyle="#1c2129";ctx.lineWidth=1;ctx.strokeRect(x,y,CELL,CELL);
+      if(showNum&&cov>0.01){ctx.fillStyle="#cfe6ff";ctx.font="9px monospace";ctx.textAlign="center";
+        ctx.fillText(cov.toFixed(2),x+CELL/2,y+CELL/2+3);}
+    }
+    // the line
+    ctx.strokeStyle="#ffb454";ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.lineTo(B.x,B.y);ctx.stroke();
+    [A,B].forEach(p=>{ctx.fillStyle="#ffb454";ctx.beginPath();ctx.arc(p.x,p.y,7,0,7);ctx.fill();});
+  }
+  function pointInsideHalf(p0,p1,px,py){
+    // crude aliased test: is pixel center to the right of segment within its y-span
+    const lo=p0.y<p1.y?p0:p1, hi=p0.y<p1.y?p1:p0;
+    if(py<lo.y||py>hi.y)return false;
+    const xat=lerp(lo.x,hi.x,(py-lo.y)/(hi.y-lo.y));
+    return px>=xat;
+  }
+  cv.addEventListener("mousedown",e=>{const r=cv.getBoundingClientRect();
+    const mx=e.clientX-r.left,my=e.clientY-r.top;dragIdx=[A,B].findIndex(p=>Math.hypot(p.x-mx,p.y-my)<14);});
+  window.addEventListener("mousemove",e=>{if(dragIdx<0)return;const r=cv.getBoundingClientRect();
+    const p={x:Math.max(2,Math.min(378,e.clientX-r.left)),y:Math.max(2,Math.min(378,e.clientY-r.top))};
+    if(dragIdx===0)A=p;else B=p;draw();});
+  window.addEventListener("mouseup",()=>dragIdx=-1);
+  root.querySelector("#lb-num").onchange=e=>{showNum=e.target.checked;draw();};
+  root.querySelector("#lb-cmp").onclick=()=>{smooth=!smooth;
+    root.querySelector("#lb-mode").innerHTML="Mode: <b>"+(smooth?"line_box (halus / anti-aliased)":"point-sample (bergerigi / aliased)")+"</b>";
+    draw();};
+  draw();
+})();
+</script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+//  DEMO 7 — Fill Rule (NonZero vs EvenOdd)
+//  Ilustrasi src/render/shaders/render_tile.frag : cabang fill_rule
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  const root = document.getElementById("demo-fillrule");
+  root.innerHTML = `
+    <h2 class="title">Fill Rule: NonZero vs EvenOdd</h2>
+    <div class="tag">Sumber: <code>src/render/shaders/render_tile.frag</code> · winding → coverage</div>
+    <p class="lead">Setelah winding dihitung, "aturan pengisian" memutuskan piksel mana yang di dalam.
+       Contoh klasik: dua lingkaran bersarang (donat). Hasilnya beda tergantung arah putaran &
+       aturan yang dipakai. Coba ganti arah lingkaran dalam & bandingkan kedua aturan.</p>
+    <div class="card">
+      <div class="canvas-wrap">
+        <canvas id="fr-cv" width="360" height="360"></canvas>
+        <div style="flex:1; min-width:250px">
+          <div class="controls" style="flex-direction:column;align-items:stretch">
+            <label>Aturan pengisian:
+              <select id="fr-rule" style="background:var(--panel2);color:var(--text);border:1px solid var(--border);padding:6px;border-radius:6px;margin-top:4px">
+                <option value="nz">NonZero (winding ≠ 0)</option>
+                <option value="eo">EvenOdd (ganjil = dalam)</option>
+              </select></label>
+            <label style="margin-top:10px"><input type="checkbox" id="fr-dir"> lingkaran dalam berlawanan arah</label>
+          </div>
+          <div class="explain" id="fr-msg"></div>
+          <table class="data">
+            <thead><tr><th>wilayah</th><th>winding</th><th>NonZero</th><th>EvenOdd</th></tr></thead>
+            <tbody id="fr-tbl"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="explain green"><b>NonZero:</b> piksel di dalam jika total winding ≠ 0.
+        <code>coverage = clamp(|winding|, 0, 1)</code>.<br>
+        <b>EvenOdd:</b> di dalam jika |winding| ganjil — pola selang-seling, tak peduli arah.</div>
+      <p class="analogy">🍩 <b>Analogi:</b> bayangkan kamu berjalan menembus dinding-dinding bentuk
+        sambil menghitung. NonZero peduli arah putaran tiap dinding; EvenOdd cuma menghitung
+        "sudah lewat berapa dinding" (ganjil = di dalam).</p>
+    </div>`;
+
+  const cv = root.querySelector("#fr-cv");
+  const ctx = hidpi(cv, 360, 360);
+  const cx=180, cy=180, R1=130, R2=70;
+  let rule="nz", innerOpposite=false;
+
+  // winding at radius: outer ring contributes +1 inside R1; inner ring contributes
+  // +1 (same dir) or -1 (opposite) inside R2.
+  function windingAt(r){
+    let w=0;
+    if(r<R1) w+=1;             // outer circle (CCW = +1)
+    if(r<R2) w+= innerOpposite ? -1 : +1;
+    return w;
+  }
+  function insideByRule(w){
+    if(rule==="nz") return w!==0;
+    return (Math.abs(w)%2)===1;
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,360,360);
+    // Paint via coarse grid sampling (cukup untuk demo, tetap mulus).
+    for(let y=0;y<360;y+=2)for(let x=0;x<360;x+=2){
+      const r=Math.hypot(x-cx,y-cy);
+      const w=windingAt(r);
+      if(insideByRule(w)){
+        ctx.fillStyle = r<R2 ? "rgba(126,231,135,.55)" : "rgba(93,176,255,.55)";
+        ctx.fillRect(x,y,2,2);
+      }
+    }
+    // ring outlines with arrows
+    drawRing(R1,"#5db0ff",false);
+    drawRing(R2,"#7ee787",innerOpposite);
+    // table
+    const tb=root.querySelector("#fr-tbl");tb.innerHTML="";
+    const regions=[["di luar semua",0,R1+40],["antara dua lingkaran",1,(R1+R2)/2],["di dalam lingkaran kecil", windingAt(0), 0]];
+    regions.forEach(([name,_w,r])=>{const w=windingAt(r);
+      tb.appendChild(el(`<tr><td>${name}</td><td>${w}</td>
+        <td style="color:${w!==0?'#7ee787':'#9aa3b2'}">${w!==0?'isi':'kosong'}</td>
+        <td style="color:${Math.abs(w)%2===1?'#7ee787':'#9aa3b2'}">${Math.abs(w)%2===1?'isi':'kosong'}</td></tr>`));});
+    const centerW=windingAt(0);
+    root.querySelector("#fr-msg").innerHTML =
+      `Pusat (lingkaran kecil): winding = <b class="readout">${centerW}</b> → `+
+      `<b style="color:${insideByRule(centerW)?'#7ee787':'#ff6b6b'}">${insideByRule(centerW)?'TERISI':'KOSONG (lubang donat)'}</b>`;
+  }
+  function drawRing(R,color,opposite){
+    ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();ctx.arc(cx,cy,R,0,7);ctx.stroke();
+    // direction arrow on the ring
+    const a=opposite?-0.4:0.4;const ax=cx+R*Math.cos(a),ay=cy+R*Math.sin(a);
+    const tang=a+(opposite?-Math.PI/2:Math.PI/2);
+    ctx.fillStyle=color;ctx.beginPath();
+    ctx.moveTo(ax,ay);
+    ctx.lineTo(ax-10*Math.cos(tang-0.4),ay-10*Math.sin(tang-0.4));
+    ctx.lineTo(ax-10*Math.cos(tang+0.4),ay-10*Math.sin(tang+0.4));
+    ctx.closePath();ctx.fill();
+  }
+  root.querySelector("#fr-rule").onchange=e=>{rule=e.target.value;draw();};
+  root.querySelector("#fr-dir").onchange=e=>{innerOpposite=e.target.checked;draw();};
+  draw();
+})();
+
+// ── Inisialisasi: tampilkan demo sesuai hash atau default overview ──
+(function(){
+  const initial = location.hash.replace("#","");
+  show(DEMOS.some(d=>d.id===initial) ? initial : "overview");
+})();
+</script>
+</body>
+</html>

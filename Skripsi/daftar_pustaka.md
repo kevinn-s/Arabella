@@ -1,39 +1,35 @@
 # Daftar Pustaka
 
-Aggarwal, S., & Kumar, N. (2021). Chapter Two - Data structures. *Advances in Computers*, 121, 43–81.
+Farin, G. (2002). *Curves and Surfaces for CAGD: A Practical Guide* (5th ed.). San Francisco: Morgan Kaufmann Publishers.
 
-Cheah, C. S. (2020). Factors Contributing to the Difficulties in Teaching and Learning of Computer Programming: A Literature Review. *CONTEMPORARY EDUCATIONAL TECHNOLOGY*, 12(2).
+Ganacim, F., Lima, R. S., de Figueiredo, L. H., & Nehab, D. (2014). Massively-parallel vector graphics. *ACM Transactions on Graphics*, 33(6), 1–14.
 
-Guo, D. (2021). Learning Algorithms for Automatic Data Structure Design. *2021 International Conference on Management of Data (SIGMOD '21)*. New York, NY, USA.
+International Business Machines Corporation. (2022). *What is parallel computing?* IBM Documentation. Diakses dari https://www.ibm.com/topics/parallel-computing
 
-He, F., Miao, X., Wu, B., & Yao, S. (2014). Using Mind Map as Learning Tool in 'Data Structure' Teaching. *2014 IEEE International Conference on Computer and Information Technology*. Xi'an, China.
+Khronos Group. (2016). *Vulkan 1.0 Specification*. The Khronos Group Inc. Diakses dari https://registry.khronos.org/vulkan/specs/1.0/html/vkspec.html
 
-Jiang, C., Wan, Y., Wang, R., & Pang, Y. (2023). Teaching Reform and Practice of Data Structure Course based on OBE Concept. *6th International Conference on Digital Technology in Education (ICDTE '22)*. New York, NY, USA.
+Khronos Group. (2022). *WebGL 2.0 Specification*. The Khronos Group Inc. Diakses dari https://registry.khronos.org/webgl/specs/latest/2.0/
 
-Kannappan, V. T., Fernando, O. N., Chattopadhyay, A., Tan, X., Hong, J. Y., Seah, H. S., & Lye, H. E. (2019). La Petite Fee Cosmo: Learning Data Structures Through Game-Based Learning. *2019 International Conference on Cyberworlds (CW)*. Kyoto, Japan.
+Kokojima, Y., Sugita, K., Saito, T., & Takemoto, T. (2006). Resolution independent rendering of deformable vector objects using graphics hardware. *ACM SIGGRAPH 2006 Sketches (SIGGRAPH '06)*. Boston, Massachusetts.
 
-Lafore, R., Broder, A., & Canning, J. (2022). *Data Structures & Algorithm in Phyton*. Addison-Wesley Professional.
+Lengyel, E. (2017). GPU-centered font rendering directly from glyph outlines. *Journal of Computer Graphics Techniques (JCGT)*, 6(2), 31–47.
 
-Lai, A.-F., & Wu, P.-J. (2015). The Development of Simulation-Based Learning System for Binary Tree of Data Structures. *2015 IEEE 15th International Conference on Advanced Learning Technologies*. Hualien, Taiwan.
+Li, R., Hou, Q., & Zhou, K. (2016). Efficient GPU path rendering using scanline rasterization. *ACM Transactions on Graphics*, 35(6), 1–12.
 
-Lai, A.-F., Wu, T.-T., Lee, G.-Y., & Lai, H.-Y. (2015). Developing a Web-based Simulation-Based Learning System for Enhancing Concepts of Linked-List Structures in Data Structures Curriculum. *2015 3rd International Conference on Artificial Intelligence, Modelling and Simulation (AIMS)*. Kota Kinabalu, Malaysia.
+Linebender. (2024). *Vello: An experimental GPU compute-centric 2D renderer*. Diakses dari https://github.com/linebender/vello
 
-Li, H., Leng, Y., & Peng, J. (2021). Research on Teaching, Management and Learning Difficulties and Solutions in "Data Structure and Algorithm" of Applied Undergraduate. *2021 International Conference on Advanced Education and Information Management (AEIM 2021)*. Shanghai, China.
+Loop, C., & Blinn, J. (2005). Resolution independent curve rendering using programmable graphics hardware. *ACM Transactions on Graphics*, 24(3), 1000–1009.
 
-Lim, W. H., Cai, Y., Yao, D., & Cao, Q. (2022). Visualize and Learn Sorting Algorithms in Data Structure Subject in a Game-based Learning. *2022 IEEE International Symposium on Mixed and Augmented Reality Adjunct (ISMAR-Adjunct)*. Singapore, Singapore.
+Mozilla Research. (2019). *Pathfinder: A fast, practical GPU rasterizer for fonts and vector graphics*. Diakses dari https://github.com/servo/pathfinder
 
-Lin, J., & Zhang, H. (2021). A Web-based Visual Learning Platform For Data Structure Course. *2021 16th International Conference on Computer Science & Education (ICCSE)*. Lancaster, United Kingdom.
+Nehab, D., & Hoppe, H. (2008). Random-access rendering of general vector graphics. *ACM Transactions on Graphics*, 27(5), 1–10.
 
-Liu, F., Guo, W., Song, Y., Wang, H., Li, X., & Sun, S. (2021). "Data Structure" Online and Offline Hybrid New Engineering "Golden Course" Construction. *2021 2nd International Conference on Computers, Information Processing and Advanced Education (CIPAE 2021)*. New York, NY, USA.
+The Cairo Project. (2023). *Cairo Graphics Library Documentation*. Diakses dari https://www.cairographics.org/documentation/
 
-Oka, A., Masuhara, H., & Aotani, T. (2018). Live, synchronized, and mental map preserving visualization for data structure programming. *2018 ACM SIGPLAN International Symposium on New Ideas, New Paradigms, and Reflections on Programming and Software (Onward! 2018)*. New York, NY, USA.
+The Rust Project Developers. (2024). *Rayon: A data parallelism library for Rust*. Diakses dari https://github.com/rayon-rs/rayon
 
-Pressman, R. S., & Maxim, B. R. (2019). *Software Engineering: A Practitioner's Appr*. McGraw-Hill Education.
+The Skia Project. (2023). *Skia Graphics Library Documentation*. Google. Diakses dari https://skia.org/docs/
 
-Ravenscroft, R. (2019). A web based block language for modeling dynamic data structure algorithms. *Journal of Computing Sciences in Colleges*, 34(6), 129–130.
+World Wide Web Consortium. (2011). *Scalable Vector Graphics (SVG) 1.1 (Second Edition)*. W3C Recommendation. Diakses dari https://www.w3.org/TR/SVG11/
 
-Rismayani, & Irmayana, A. (2017). The implementation of e-learning into mobile-based interactive data structure subject. *2017 5th International Conference on Cyber and IT Service Management (CITSM)*. Denpasar, Indonesia.
-
-Sheng, Y., Hu, H., Cheng, X., & Duan, G. (2020). Data Structure Visualization on the Web. *2020 IEEE International Conference on Big Data (Big Data)*. Atlanta, GA, USA.
-
-Yang, B., Song, C., Zhang, W., & Sun, X. (2020). Discussion on Online and Offline Teaching Mode of Data Structure. *4th International Conference on Digital Technology in Education (ICDTE '20)*. New York, NY, USA.
+World Wide Web Consortium. (2025). *WebGPU*. W3C Working Draft. Diakses dari https://www.w3.org/TR/webgpu/

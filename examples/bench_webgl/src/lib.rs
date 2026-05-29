@@ -336,6 +336,8 @@ struct BenchState {
     render_size: RenderSize,
 
     assets: Vec<AssetData>,
+    /// Assets captured as PNG only (not timed); used for Bab 4.6 illustrations.
+    capture_only: Vec<AssetData>,
     asset_idx: usize,
     phase: Phase,
 
@@ -558,7 +560,8 @@ impl BenchState {
 
     /// Render each asset once more and capture the canvas as a PNG data URL,
     /// shown on-page as a downloadable thumbnail. Used to produce the visual
-    /// correctness figures for Subbab 4.3.
+    /// figures for Subbab 4.3 (benchmarked assets) and Subbab 4.6
+    /// (capture-only assets that illustrate parser limitations).
     ///
     /// The WebGL context is created without `preserveDrawingBuffer`, so the
     /// drawing buffer is cleared once the browser composites the frame. We
@@ -566,63 +569,87 @@ impl BenchState {
     /// tick, before yielding back to the compositor, so the buffer is still
     /// intact when read.
     fn capture_images(&mut self) {
-        if let Ok(heading) = self.document.create_element("h3") {
-            let heading: web_sys::HtmlElement = heading.dyn_into().unwrap();
-            heading.set_inner_text(
-                "Output rendering Arabella (klik tiap gambar untuk mengunduh PNG verifikasi visual 4.3):",
-            );
-            self.body.append_child(&heading).ok();
-        }
-
-        // Re-bind the asset list out of self to satisfy the borrow checker
-        // while we also touch self.scene / self.renderer.
+        // Verification figures (Subbab 4.3): benchmarked assets.
+        self.add_heading(
+            "Output rendering Arabella — verifikasi visual 4.3 (klik tiap gambar untuk mengunduh PNG):",
+        );
         let n = self.assets.len();
         for i in 0..n {
             // Build + render this asset, then immediately snapshot.
-            let name = self.assets[i].name;
             build_scene(&mut self.scene, &self.assets[i]);
             self.renderer.render(&self.scene, &self.render_size);
-
-            let data_url = match self.canvas.to_data_url_with_type("image/png") {
-                Ok(u) => u,
-                Err(_) => {
-                    web_sys::console::warn_1(
-                        &format!("[bench] toDataURL failed for {name}").into(),
-                    );
-                    continue;
-                }
-            };
-
-            // Wrap the image in an <a download> so a click saves the PNG.
-            if let (Ok(anchor), Ok(img)) = (
-                self.document.create_element("a"),
-                self.document.create_element("img"),
-            ) {
-                let anchor: web_sys::HtmlElement = anchor.dyn_into().unwrap();
-                anchor.set_attribute("href", &data_url).ok();
-                let file_name = format!("arabella_{}.png", name.replace(".svg", ""));
-                anchor.set_attribute("download", &file_name).ok();
-                anchor.set_attribute("title", &format!("Unduh {file_name}")).ok();
-                anchor.style().set_property("display", "inline-block").ok();
-                anchor.style().set_property("margin", "8px").ok();
-
-                let img: web_sys::HtmlElement = img.dyn_into().unwrap();
-                img.set_attribute("src", &data_url).ok();
-                img.set_attribute("alt", name).ok();
-                img.style().set_property("border", "1px solid #444").ok();
-                img.style().set_property("display", "block").ok();
-                img.style().set_property("max-width", "540px").ok();
-
-                anchor.append_child(&img).ok();
-                self.body.append_child(&anchor).ok();
-            }
-
-            web_sys::console::log_1(
-                &format!("[bench] captured PNG for {name} ({} bytes data URL)", data_url.len())
-                    .into(),
-            );
+            let name = self.assets[i].name;
+            self.snapshot_canvas(name);
         }
+
+        // Limitation figures (Subbab 4.6): capture-only assets.
+        if !self.capture_only.is_empty() {
+            self.add_heading(
+                "Ilustrasi keterbatasan parser — Bab 4.6 (klik tiap gambar untuk mengunduh PNG):",
+            );
+            let m = self.capture_only.len();
+            for i in 0..m {
+                build_scene(&mut self.scene, &self.capture_only[i]);
+                self.renderer.render(&self.scene, &self.render_size);
+                let name = self.capture_only[i].name;
+                self.snapshot_canvas(name);
+            }
+        }
+
         web_sys::console::log_1(&"[bench] image capture done.".into());
+    }
+
+    /// Append a section heading to the page.
+    fn add_heading(&self, text: &str) {
+        if let Ok(heading) = self.document.create_element("h3") {
+            let heading: web_sys::HtmlElement = heading.dyn_into().unwrap();
+            heading.set_inner_text(text);
+            self.body.append_child(&heading).ok();
+        }
+    }
+
+    /// Read the current canvas as a PNG data URL and append it to the page as
+    /// a downloadable thumbnail. Must be called right after `render()` in the
+    /// same tick (no `preserveDrawingBuffer`).
+    fn snapshot_canvas(&self, name: &str) {
+        let data_url = match self.canvas.to_data_url_with_type("image/png") {
+            Ok(u) => u,
+            Err(_) => {
+                web_sys::console::warn_1(
+                    &format!("[bench] toDataURL failed for {name}").into(),
+                );
+                return;
+            }
+        };
+
+        // Wrap the image in an <a download> so a click saves the PNG.
+        if let (Ok(anchor), Ok(img)) = (
+            self.document.create_element("a"),
+            self.document.create_element("img"),
+        ) {
+            let anchor: web_sys::HtmlElement = anchor.dyn_into().unwrap();
+            anchor.set_attribute("href", &data_url).ok();
+            let file_name = format!("arabella_{}.png", name.replace(".svg", ""));
+            anchor.set_attribute("download", &file_name).ok();
+            anchor.set_attribute("title", &format!("Unduh {file_name}")).ok();
+            anchor.style().set_property("display", "inline-block").ok();
+            anchor.style().set_property("margin", "8px").ok();
+
+            let img: web_sys::HtmlElement = img.dyn_into().unwrap();
+            img.set_attribute("src", &data_url).ok();
+            img.set_attribute("alt", name).ok();
+            img.style().set_property("border", "1px solid #444").ok();
+            img.style().set_property("display", "block").ok();
+            img.style().set_property("max-width", "540px").ok();
+
+            anchor.append_child(&img).ok();
+            self.body.append_child(&anchor).ok();
+        }
+
+        web_sys::console::log_1(
+            &format!("[bench] captured PNG for {name} ({} bytes data URL)", data_url.len())
+                .into(),
+        );
     }
 }
 
@@ -656,8 +683,44 @@ fn create_canvas(width: u32, height: u32) -> HtmlCanvasElement {
     canvas
 }
 
+/// Remove an XML DOCTYPE / DTD declaration from an SVG source string.
+///
+/// `PicoSvg::load` parses with roxmltree's default options, which reject any
+/// document containing a DTD (`DtdDetected`). Some assets (e.g. el_gato.svg,
+/// exported by older tools) carry a `<!DOCTYPE svg PUBLIC ...>` line. We strip
+/// it here in the benchmark harness so the asset can be parsed; this does not
+/// touch the core library and does not affect geometry.
+fn strip_doctype(svg: &str) -> String {
+    let mut out = String::with_capacity(svg.len());
+    let mut rest = svg;
+    while let Some(start) = rest.find("<!DOCTYPE") {
+        out.push_str(&rest[..start]);
+        // DOCTYPE may contain an internal subset in [ ... ]; skip to the
+        // matching '>' that closes the declaration (after any ']').
+        let after = &rest[start..];
+        let end = if let Some(br) = after.find('[') {
+            // internal subset present: find ']' then the next '>'
+            after[br..]
+                .find(']')
+                .and_then(|rb| after[br + rb..].find('>').map(|g| br + rb + g))
+        } else {
+            after.find('>')
+        };
+        match end {
+            Some(e) => rest = &after[e + 1..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 fn load_asset(name: &'static str, svg: &str) -> AssetData {
-    let pico = PicoSvg::load(svg, 1.0).expect("Failed to parse SVG");
+    let cleaned = strip_doctype(svg);
+    let pico = PicoSvg::load(&cleaned, 1.0).expect("Failed to parse SVG");
     // Collect with identity base so the stored op transforms are pure
     // geometry-space; the per-asset fit transform is composed at build time.
     let mut ops = Vec::new();
@@ -717,6 +780,7 @@ pub fn run_benchmark() {
         );
     }
 
+    // Assets that are BENCHMARKED (timed) and captured as PNG.
     let assets = vec![
         load_asset(
             "Ghostscript_Tiger.svg",
@@ -724,6 +788,15 @@ pub fn run_benchmark() {
         ),
         load_asset("el_gato.svg", include_str!("../../../assets/el_gato.svg")),
         load_asset("paris-30k.svg", include_str!("../../../assets/paris-30k.svg")),
+    ];
+
+    // Assets that are ONLY captured as PNG (not timed) — used to illustrate
+    // parser limitations in Bab 4.6. These rely on unsupported SVG features
+    // (SVG_Logo uses defs/use; bismillah uses pattern), so their output
+    // deliberately differs from the browser reference.
+    let capture_only = vec![
+        load_asset("SVG_Logo.svg", include_str!("../../../assets/SVG_Logo.svg")),
+        load_asset("bismillah.svg", include_str!("../../../assets/bismillah.svg")),
     ];
 
     let first_warmup = budget_for(assets[0].ops.len()).0;
@@ -738,6 +811,7 @@ pub fn run_benchmark() {
             height: BENCH_H as u32,
         },
         assets,
+        capture_only,
         asset_idx: 0,
         phase: Phase::Warmup(first_warmup),
         issued: 0,

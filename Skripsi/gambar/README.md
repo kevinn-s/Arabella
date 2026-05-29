@@ -37,6 +37,38 @@ tangkapan layar area gambar. Simpan di folder ini dengan nama:
 Alternatif renderer referensi: resvg, Inkscape, atau Firefox — pilih salah
 satu dan sebutkan di Bab 4.3 renderer referensi mana yang dipakai.
 
+## Ilustrasi keterbatasan parser Bab 4.6
+
+Bab 4.6 merujuk empat berkas gambar tambahan: untuk dua dokumen SVG yang
+berada di luar subset parser (SVG Logo memakai `defs`/`use`, Bismillah
+memakai `pattern`), masing-masing satu keluaran Arabella dan satu rendering
+referensi peramban. Gambar-gambar ini sengaja menampilkan selisih visual
+sebagai bukti keterbatasan parser.
+
+Cara memperolehnya:
+
+1. Drag-drop `assets/SVG_Logo.svg` dan `assets/bismillah.svg` ke tab Chrome
+   untuk panel referensi; simpan tangkapan layarnya sebagai
+   `4.4b-svglogo-referensi.png` dan `4.5b-bismillah-referensi.png`.
+2. Untuk keluaran Arabella, tambahkan sementara kedua berkas tersebut ke
+   daftar aset pada `examples/bench_webgl/src/lib.rs` (fungsi `run_benchmark`,
+   lewat `load_asset`), jalankan benchmark, lalu unduh PNG hasil tangkapan
+   kanvas. Simpan sebagai `4.4a-svglogo-arabella.png` dan
+   `4.5a-bismillah-arabella.png`, lalu kembalikan daftar aset ke semula.
+
+Catatan: `load_asset` pada harness sudah memanggil `strip_doctype`, sehingga
+berkas ber-DOCTYPE pun dapat diparse untuk keperluan ilustrasi ini.
+
+### Daftar nama berkas yang dirujuk skripsi
+
+| Berkas | Dirujuk di |
+|---|---|
+| `4.1a-tiger-arabella.png`, `4.1b-tiger-referensi.png` | Gambar 4.1 |
+| `4.2a-elgato-arabella.png`, `4.2b-elgato-referensi.png` | Gambar 4.2 |
+| `4.3a-paris-arabella.png`, `4.3b-paris-referensi.png` | Gambar 4.3 |
+| `4.4a-svglogo-arabella.png`, `4.4b-svglogo-referensi.png` | Gambar 4.4 |
+| `4.5a-bismillah-arabella.png`, `4.5b-bismillah-referensi.png` | Gambar 4.5 |
+
 ### Catatan
 
 Setelah keenam berkas tersedia di folder ini dengan nama di atas, sintaks

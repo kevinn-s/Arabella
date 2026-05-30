@@ -10,7 +10,7 @@ Kerangka berpikir dalam penelitian ini dirancang untuk memberikan tahapan yang s
 
 2. **Fase 2: Analisis Kebutuhan Sistem**
    - Mengidentifikasi keterbatasan lingkungan grafis non-compute pada perangkat low-end.
-   - Merumuskan spesifikasi fungsional pustaka (library) rendering berbasis pemrograman sistem Rust dan API grafis OpenGL ES 3.0 / WebGL 2.0.
+   - Merumuskan spesifikasi fungsional pustaka (library) rendering berbasis pemrograman sistem Rust dan API grafis WebGL 2.0.
 
 3. **Fase 3: Perancangan Arsitektur dan Algoritma**
    - Merancang pembagian beban kerja hibrida: tahap preprocessing paralel masif pada Central Processing Unit (CPU) dan tahap rasterisasi pada Graphics Processing Unit (GPU).
@@ -19,13 +19,13 @@ Kerangka berpikir dalam penelitian ini dirancang untuk memberikan tahapan yang s
 
 4. **Fase 4: Implementasi Purwarupa (Prototype)**
    - Membangun modul parser SVG dan arsitektur data memori di CPU menggunakan Rust.
-   - Mengimplementasikan paralelisasi tingkat tile pada CPU menggunakan pustaka data paralel Rayon.
-   - Mengembangkan pemrosesan Vertex Shader dan Fragment Shader konvensional pada GPU menggunakan OpenGL ES 3.0.
+   - Menyusun struktur data spasial berbasis tile yang dirancang agar pemrosesan antar-jalur saling independen, sehingga membuka jalan bagi paralelisasi tingkat data melalui pustaka Rayon pada pengembangan lanjutan; pada implementasi yang dievaluasi, optimasi paralelisme yang sudah aktif adalah paralelisme tingkat instruksi melalui SIMD pada hot path transformasi dan flattening, sedangkan feature `multithreading` berbasis Rayon masih bersifat opsional dan belum diaktifkan pada build baku.
+   - Mengembangkan pemrosesan Vertex Shader dan Fragment Shader konvensional pada GPU menggunakan WebGL 2.0.
 
 5. **Fase 5: Pengujian dan Evaluasi**
-   - Melakukan validasi kebenaran output visual (correctness validation) dengan membandingkan citra hasil purwarupa terhadap renderer referensi sekuler.
-   - Melakukan pengujian performa (benchmarking) untuk mengukur metrik frame time (kecepatan per bingkai) serta skalabilitas throughput sistem terhadap penambahan jumlah core CPU.
-   - Menganalisis trade-off kualitatif dan kuantitatif pustaka yang diusulkan terhadap mesin rendering berbasis CPU murni (Skia/Cairo) serta berbasis GPU komputasi penuh (Vello).
+   - Melakukan validasi kebenaran output visual (correctness validation) dengan membandingkan citra hasil purwarupa terhadap renderer referensi peramban.
+   - Melakukan pengujian performa (benchmarking) untuk mengukur metrik frame time per bingkai yang didekomposisi menjadi biaya tahap pra-pemrosesan di CPU dan biaya tahap rasterisasi di GPU secara terpisah.
+   - Menganalisis secara kualitatif posisi arsitektur pustaka yang diusulkan terhadap mesin rendering berbasis CPU murni (Skia/Cairo) serta berbasis GPU komputasi penuh (Vello) pada dimensi paradigma rasterisasi, ketergantungan compute shader, dan target platform.
 
 ## 3.2 Analisis Kebutuhan
 
@@ -41,9 +41,9 @@ Untuk memvalidasi urgensi pengembangan sistem, dilakukan analisis komparatif ter
 
 1. **Vello (Linebender)** — Merupakan mesin rendering modern yang mengadopsi paradigma GPU compute-centric. Pustaka ini memindahkan seluruh komputasi sekuensial yang berat — seperti tessellation, pemotongan geometri (clipping), dan alokasi memori spasial — langsung ke GPU menggunakan serangkaian compute shader dispatches. Akselerasi paralelnya memanfaatkan algoritma parallel prefix-sum guna menurunkan kompleksitas serial $O(n)$ menjadi tugas paralel $O(\log n)$. Walaupun menghasilkan throughput masif pada perangkat high-end, Vello memerlukan dukungan WebGPU API atau Vulkan modern, sehingga tidak dapat beroperasi secara stabil pada segmen perangkat keras legacy atau low-end kelas konsumen.
 
-2. **Massively-Parallel Vector Graphics (Gan et al., 2014)** — Sistem ini memparalelkan tahap preprocessing segmen geometri masukan dan tahap rendering sampel piksel secara simultan di GPU. Komponen intinya memanfaatkan struktur data spasial hierarkis adaptif bernama Shortcut Tree (berbasis quadtree) untuk memberikan akses acak cepat terhadap nilai warna piksel. Namun, implementasi algoritma ini sangat bergantung pada arsitektur komputasi umum GPU yang spesifik (seperti teknologi NVIDIA CUDA) untuk menangani warping dan penjadwalan sampel, yang secara drastis membatasi portabilitas lintas platform.
+2. **Massively-Parallel Vector Graphics (Ganacim dkk., 2014)** — Sistem ini memparalelkan tahap preprocessing segmen geometri masukan dan tahap rendering sampel piksel secara simultan di GPU. Komponen intinya memanfaatkan struktur data spasial hierarkis adaptif bernama Shortcut Tree (berbasis quadtree) untuk memberikan akses acak cepat terhadap nilai warna piksel. Namun, implementasi algoritma ini sangat bergantung pada arsitektur komputasi umum GPU yang spesifik (seperti teknologi NVIDIA CUDA) untuk menangani warping dan penjadwalan sampel, yang secara drastis membatasi portabilitas lintas platform.
 
-3. **Efficient GPU Path Rendering Using Scanline Rasterization (Li et al., 2016)** — Pendekatan ini mengadaptasi algoritma scanline rasterizer klasik agar berjalan paralel di atas GPU. Logika utamanya memisahkan pemrosesan antara piksel perbatasan jalur (boundary fragments berukuran $2 \times 2$ piksel) dan piksel bagian dalam (horizontal spans). Pendekatan ini meminimalkan biaya komputasi winding number global dengan melokalisasi komputasi cakupan anti-aliasing. Walaupun efisien, sistem ini tetap mengandalkan arsitektur compute pipeline untuk fase pengurutan (sorting) dan penggabungan (merging) fragmen sebelum tahap rasterisasi akhir dilakukan.
+3. **Efficient GPU Path Rendering Using Scanline Rasterization (Li dkk., 2016)** — Pendekatan ini mengadaptasi algoritma scanline rasterizer klasik agar berjalan paralel di atas GPU. Logika utamanya memisahkan pemrosesan antara piksel perbatasan jalur (boundary fragments berukuran $2 \times 2$ piksel) dan piksel bagian dalam (horizontal spans). Pendekatan ini meminimalkan biaya komputasi winding number global dengan melokalisasi komputasi cakupan anti-aliasing. Walaupun efisien, sistem ini tetap mengandalkan arsitektur compute pipeline untuk fase pengurutan (sorting) dan penggabungan (merging) fragmen sebelum tahap rasterisasi akhir dilakukan.
 
 ### 3.2.3 Rumusan dan Solusi Kebutuhan
 
@@ -52,7 +52,7 @@ Berdasarkan analisis kesenjangan (gap analysis) terhadap aplikasi sejenis, berik
 | No | Rumusan Masalah Keperluan Sistem | Solusi Teknis Terimplementasi |
 |----|----------------------------------|-------------------------------|
 | 1 | Kebutuhan akan metode rendering grafis vektor paralel secara masif yang tidak bergantung pada fitur compute shader. | Merancang pipeline hibrida yang membagi tugas secara tegas: mengeksekusi tahapan preprocessing spasial secara paralel masif di CPU, dan mengalokasikan rasterisasi piksel ke GPU. |
-| 2 | Kebutuhan akan jaminan kompatibilitas platform yang luas, terutama pada lingkungan grafis terbatas (web lama dan perangkat low-end). | Membatasi implementasi GPU secara ketat hanya pada rasterization pipeline tradisional menggunakan Vertex Shader dan Fragment Shader standar OpenGL ES 3.0 / WebGL 2.0. |
+| 2 | Kebutuhan akan jaminan kompatibilitas platform yang luas, terutama pada lingkungan grafis terbatas (web lama dan perangkat low-end). | Membatasi implementasi GPU secara ketat hanya pada rasterization pipeline tradisional menggunakan Vertex Shader dan Fragment Shader standar WebGL 2.0. |
 | 3 | Kebutuhan akan efisiensi performa tinggi dan minimalisasi overdraw komputasi pada skenario adegan (scene) vektor yang kompleks. | Menerapkan segmentasi layar berbasis tiling (ubin) berukuran tetap di CPU melalui pipeline tiga tahap: binning DDA dua tahap (outer DDA lintas baris ubin dan inner DDA lintas kolom ubin) untuk memecah segmen garis ke ubin yang dilintasinya, akumulator signed-area per scanline untuk menghitung winding number secara inkremental, dan propagasi backdrop kiri-ke-kanan saat emisi ubin, sehingga hanya ubin nontrivial yang dikirim ke memori GPU. |
 
 ## 3.3 Perancangan Aplikasi
@@ -67,18 +67,23 @@ Pustaka rendering vektor paralel Arabella dirancang sebagai crate Rust yang mena
 
 **Target Eksekusi dan API Grafis.** Target eksekusi utama Arabella adalah `wasm32-unknown-unknown` pada lingkungan peramban dengan API grafis WebGL 2.0 sebagai target langsung tanpa lapisan transpilasi tambahan. Konfigurasi target wasm dideklarasikan pada blok `[target.'cfg(target_arch = "wasm32")'.dependencies]` (`Cargo.toml:57-87`) yang menarik fitur `WebGl2RenderingContext` dari crate `web-sys` untuk akses langsung ke konteks WebGL 2.0. Target dokumentasi `wasm32-unknown-unknown` juga dieksplisitkan pada `[package.metadata.docs.rs]` melalui `targets = ["wasm32-unknown-unknown"]` (`Cargo.toml:26`). Tidak ada penarikan API WebGL 1.0 (`WebGlRenderingContext` tanpa angka 2) maupun WebGPU (`WebGpu*`) pada blok target wasm tersebut.
 
-**Dependensi Langsung.** Pustaka Arabella mendeklarasikan sepuluh crate sebagai dependensi langsung pada blok `[dependencies]` (`Cargo.toml:28-41`), dengan ejaan dan versi persis seperti tertulis pada manifest:
+**Dependensi Langsung.** Pustaka Arabella mendeklarasikan tiga belas crate sebagai dependensi langsung pada blok `[dependencies]` (`Cargo.toml:29-42`), dengan ejaan dan versi persis seperti tertulis pada manifest (diurutkan menurut posisi baris pada manifest):
 
-1. `fearless_simd` versi `"0.4.0"` (`Cargo.toml:30`) — abstraksi SIMD portabel yang dipakai untuk akselerasi paralelisme tingkat instruksi pada hot path pra-pemrosesan CPU.
-2. `lyon_path` versi `"1.0.19"` (`Cargo.toml:36`) — representasi `Path` 2D yang dipakai untuk konstruksi geometri vektor.
-3. `lyon_geom` versi `"1.0.19"` (`Cargo.toml:37`) — operasi geometri 2D pada segmen garis dan kurva Bézier.
-4. `kurbo` versi `"0.13.0"` (`Cargo.toml:40`) — pustaka geometri kurva 2D yang menyediakan tipe `BezPath`, `Affine`, dan `Point` untuk representasi internal jalur.
-5. `peniko` versi `"0.6.1"` dengan `default-features = false` dan `features = ["libm"]` (`Cargo.toml:39`) — primitif paint dan warna (`AlphaColor`, `Srgb`) yang dipakai parser SVG dan jalur paint.
-6. `roxmltree` versi `"0.20.0"` (`Cargo.toml:41`) — parser XML read-only yang dipakai oleh `src/pico_svg.rs` untuk membaca dokumen SVG.
-7. `bytemuck` versi `"1.25.0"` dengan `features = ["derive", "extern_crate_alloc"]` (`Cargo.toml:29`) — utilitas reinterpretasi tipe POD untuk menyiapkan vertex buffer dan tekstur GPU.
-8. `thiserror` versi `"2.0.18"` (`Cargo.toml:34`) — derive macro untuk tipe error idiomatik pada antarmuka publik.
-9. `hashbrown` versi `"0.17.0"` (`Cargo.toml:32`) — implementasi `HashMap` performansi tinggi.
-10. `smallvec` versi `"1.15.1"` (`Cargo.toml:33`) — kontainer vektor dengan kapasitas inline yang dipakai untuk menampung koleksi kecil pada hot path tanpa alokasi heap.
+1. `bytemuck` versi `"1.25.0"` dengan `features = ["derive", "extern_crate_alloc"]` (`Cargo.toml:30`) — utilitas reinterpretasi tipe POD untuk menyiapkan vertex buffer dan tekstur GPU.
+2. `fearless_simd` versi `"0.4.0"` (`Cargo.toml:31`) — abstraksi SIMD portabel yang dipakai untuk akselerasi paralelisme tingkat instruksi pada hot path pra-pemrosesan CPU.
+3. `png` versi `"0.18.1"`, ditandai `optional = true` (`Cargo.toml:32`) — encoder PNG yang ditarik oleh feature `png` (termasuk dalam `default`) untuk menyimpan keluaran kanvas sebagai berkas citra pada harness pengujian dan benchmark.
+4. `hashbrown` versi `"0.17.0"` (`Cargo.toml:33`) — implementasi `HashMap` performansi tinggi.
+5. `smallvec` versi `"1.15.1"` (`Cargo.toml:34`) — kontainer vektor dengan kapasitas inline yang dipakai untuk menampung koleksi kecil pada hot path tanpa alokasi heap.
+6. `thiserror` versi `"2.0.18"` (`Cargo.toml:35`) — derive macro untuk tipe error idiomatik pada antarmuka publik.
+7. `log` versi `"0.4.29"` (`Cargo.toml:36`) — fasad logging ringan yang dipakai untuk mencatat pesan diagnostik selama eksekusi.
+8. `lyon_path` versi `"1.0.19"` (`Cargo.toml:37`) — representasi `Path` 2D yang dipakai untuk konstruksi geometri vektor.
+9. `lyon_geom` versi `"1.0.19"` (`Cargo.toml:38`) — operasi geometri 2D pada segmen garis dan kurva Bézier.
+10. `lyon_algorithms` versi `"1.0.20"` (`Cargo.toml:39`) — kumpulan algoritma jalur 2D (path algorithms) pelengkap `lyon_path` dan `lyon_geom`.
+11. `peniko` versi `"0.6.1"` dengan `default-features = false` dan `features = ["libm"]` (`Cargo.toml:40`) — primitif paint dan warna (`AlphaColor`, `Srgb`) yang dipakai parser SVG dan jalur paint.
+12. `kurbo` versi `"0.13.0"` (`Cargo.toml:41`) — pustaka geometri kurva 2D yang menyediakan tipe `BezPath`, `Affine`, dan `Point` untuk representasi internal jalur.
+13. `roxmltree` versi `"0.20.0"` (`Cargo.toml:42`) — parser XML read-only yang dipakai oleh `src/pico_svg.rs` untuk membaca dokumen SVG.
+
+Di antara ketiga belas crate tersebut, hanya `png` yang ditandai `optional` namun tetap aktif pada build baku karena ditarik oleh feature `png` yang termasuk dalam `default = ["std", "png"]`; dua belas crate lainnya bersifat wajib tanpa gerbang feature.
 
 **Pustaka Konkurensi CPU (Opsional).** Crate `rayon` versi `"1.11.0"` dideklarasikan sebagai dependensi opsional pada blok `[target.'cfg(not(target_arch = "wasm32"))'.dependencies]` (`Cargo.toml:48-50`) bersama crate `thread_local` versi `"1.1.9"`, keduanya ditandai `optional = true`. Kedua crate tersebut hanya ditarik ketika feature flag `multithreading = ["std", "dep:rayon", "dep:thread_local"]` (`Cargo.toml:94`) diaktifkan secara opt-in. Karena `multithreading` tidak termasuk dalam feature `default = ["std", "png"]`, build standar tidak menyertakan Rayon. Pada implementasi yang dievaluasi dalam penelitian ini, feature `multithreading` belum dipanggil pada hot path pra-pemrosesan CPU; dengan demikian, klaim paralelisme CPU yang dijabarkan pada Subbab 3.5 bersifat potensial — yaitu kapasitas yang sudah disiapkan pada manifest dependensi — bukan paralelisme yang sudah aktif pada implementasi saat ini.
 
@@ -289,7 +294,7 @@ Setelah outer DDA mengklip sub-segmen ke satu baris ubin, **inner DDA** pada `Bl
 
 **(c) Akumulator Signed-Area per Scanline pada 8.8 Fixed-Point**
 
-Bersamaan dengan setiap pemanggilan `push_to_tile`, fungsi `record_per_scanline_crossings` (`src/blocks.rs:710-757`) mengakumulasi sumbangan signed area sub-segmen vertikal terhadap delapan strip scanline pada satu ubin. Akumulator disimpan sebagai `[i16; TILE_H]` — delapan akumulator i16 per cell, satu per scanline — pada format 8.8 fixed-point dengan konvensi tanda eksplisit: garis turun ($y_0 < y_1$) mengurangi akumulator sebesar $-256$ unit (setara $-1$ winding penuh), sedangkan garis naik ($y_0 > y_1$) menambah akumulator sebesar $+256$ unit (setara $+1$ winding penuh). Penjumlahan memakai `saturating_add` agar tidak terjadi overflow i16 untuk segmen yang melintasi banyak scanline. Skema ini adalah akumulator signed-area kanonik gaya Blaze, FreeType, dan Skia, yang dipilih agar fragment shader pada GPU dapat melakukan multisampling sub-piksel tanpa residu winding yang menggariskan seam antar ubin tetangga. Hasil array signed-area per cell disimpan pada `CoverStorage::backdrops: Vec<[i16; TILE_H]>` (`src/builder.rs:360-369`) yang dialokasikan ulang per shape oleh `CoverStorage::reset_for_shape` (`src/builder.rs:413`).
+Bersamaan dengan setiap pemanggilan `push_to_tile`, fungsi `record_per_scanline_crossings` (`src/blocks.rs:710-757`) mengakumulasi sumbangan signed area sub-segmen vertikal terhadap delapan strip scanline pada satu ubin. Akumulator disimpan sebagai `[i16; TILE_H]` — delapan akumulator i16 per cell, satu per scanline — pada format 8.8 fixed-point dengan konvensi tanda eksplisit: garis turun ($y_0 < y_1$) mengurangi akumulator sebesar $-256$ unit (setara $-1$ winding penuh), sedangkan garis naik ($y_0 > y_1$) menambah akumulator sebesar $+256$ unit (setara $+1$ winding penuh). Penjumlahan memakai `saturating_add` agar tidak terjadi overflow i16 untuk segmen yang melintasi banyak scanline. Skema ini adalah akumulator signed-area kanonik gaya Blaze (Gasiulis, 2024), FreeType (The FreeType Project, 2023), dan Skia (The Skia Project, 2023), yang dipilih agar fragment shader pada GPU dapat melakukan multisampling sub-piksel tanpa residu winding yang menggariskan seam antar ubin tetangga. Hasil array signed-area per cell disimpan pada `CoverStorage::backdrops: Vec<[i16; TILE_H]>` (`src/builder.rs:360-369`) yang dialokasikan ulang per shape oleh `CoverStorage::reset_for_shape` (`src/builder.rs:413`).
 
 **(d) Propagasi Backdrop Kiri-ke-Kanan**
 

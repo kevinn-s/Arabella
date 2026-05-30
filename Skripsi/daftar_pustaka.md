@@ -4,6 +4,8 @@ Farin, G. (2002). *Curves and Surfaces for CAGD: A Practical Guide* (5th ed.). S
 
 Ganacim, F., Lima, R. S., de Figueiredo, L. H., & Nehab, D. (2014). Massively-parallel vector graphics. *ACM Transactions on Graphics*, 33(6), 1–14.
 
+Gasiulis, A. (2024). *Blaze: Multi-threaded, CPU-based vector graphics rasterizer* [Perangkat lunak]. GitHub. Diakses dari https://github.com/aurimasg/blaze
+
 International Business Machines Corporation. (2022). *What is parallel computing?* IBM Documentation. Diakses dari https://www.ibm.com/topics/parallel-computing
 
 Khronos Group. (2016). *Vulkan 1.0 Specification*. The Khronos Group Inc. Diakses dari https://registry.khronos.org/vulkan/specs/1.0/html/vkspec.html
@@ -25,6 +27,8 @@ Mozilla Research. (2019). *Pathfinder: A fast, practical GPU rasterizer for font
 Nehab, D., & Hoppe, H. (2008). Random-access rendering of general vector graphics. *ACM Transactions on Graphics*, 27(5), 1–10.
 
 The Cairo Project. (2023). *Cairo Graphics Library Documentation*. Diakses dari https://www.cairographics.org/documentation/
+
+The FreeType Project. (2023). *FreeType: A freely available software library to render fonts*. Diakses dari https://freetype.org/
 
 The Rust Project Developers. (2024). *Rayon: A data parallelism library for Rust*. Diakses dari https://github.com/rayon-rs/rayon
 

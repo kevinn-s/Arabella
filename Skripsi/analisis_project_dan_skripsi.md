@@ -1,5 +1,8 @@
 # Laporan Analisis Project dan Skripsi
 
+> ⚠️ **STATUS: DOKUMEN KERJA INTERNAL — USANG — BUKAN BAGIAN NASKAH SKRIPSI.**
+> Dokumen ini adalah catatan kerja awal yang dipakai sebagai dasar revisi Bab 3 dan penulisan Bab 4/5. **Isinya sudah tidak mencerminkan kondisi terkini** — bagian E masih menyebut Bab 4, Bab 5, Abstrak, dan Daftar Pustaka sebagai "lorem ipsum / tidak relevan", padahal keempatnya kini sudah ditulis lengkap dan relevan. Banyak ketidaksesuaian pada bagian D juga sudah diperbaiki. **JANGAN dikumpulkan, dicetak, atau dilampirkan ke naskah skripsi final.** Jejak revisi yang aktual dan terkini ada pada `catatan_revisi_konsistensi.md`.
+
 > Dokumen analisis menyeluruh terhadap source code project Arabella dan dokumen skripsi pada folder `Skripsi/`. Disusun sebagai dasar untuk revisi Bab 3 dan penulisan Bab 4.
 
 ---

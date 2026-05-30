@@ -1,9 +1,11 @@
 //! Deterministic Arabella performance benchmark with true GPU timing.
 //!
-//! Renders the three thesis test assets (Ghostscript Tiger, SVG Logo,
-//! Bismillah) at a FIXED canvas resolution of 1080x520 — the same
-//! resolution as the automated test harness in `tests/test.rs` — so the
+//! Benchmarks (times) three thesis test assets — Ghostscript Tiger, el_gato,
+//! and paris-30k — at a FIXED canvas resolution of 1080x520 (the same
+//! resolution as the automated test harness in `tests/test.rs`), so the
 //! numbers are reproducible across machines (modulo the GPU/CPU under test).
+//! Two additional assets (SVG Logo, Bismillah) are captured as PNG only (not
+//! timed) to illustrate parser limitations in Bab 4.6.
 //!
 //! Timing methodology:
 //!   * CPU pre-processing (`Scene::reset` + every `fill`/`stroke`) is timed

@@ -4,8 +4,6 @@ use fearless_simd::*;
 use lyon_geom::{Point, Box2D, Transform};
 use lyon_path::{Event, Iter};
 
-use crate::{TILE_HEIGHT, TILE_WIDTH};
-
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct Tile {

@@ -36,6 +36,8 @@ pub enum RenderError {
 
 const COLOR_SOURCE_SHIFT: u32 = 30;
 
-pub const TILE_WIDTH: f32 = 4.0;
-pub const TILE_HEIGHT: f32 = 4.0;
+// Catatan: dimensi ubin yang dipakai pipeline adalah 16x8 piksel, didefinisikan
+// sebagai `TILE_W = 16` / `TILE_H = 8` pada `src/blocks.rs` (dan dipakai ulang di
+// `src/builder.rs` serta kedua shader). Konstanta lama `TILE_WIDTH`/`TILE_HEIGHT`
+// bernilai 4.0 yang tidak dipakai jalur manapun telah dihapus agar tidak rancu.
 

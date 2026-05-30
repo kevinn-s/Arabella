@@ -321,7 +321,11 @@ impl WebGlRenderer {
        let config = Config {
     width: render_size.width,
     height: render_size.height,
-    tile_height: 4u32,
+    // Tinggi ubin dalam piksel (TILE_H = 8). Field ini bagian dari layout UBO
+    // std140; nilai disetel 8 agar konsisten dengan `#define TILE_HEIGHT 8u` di
+    // shader. Shader saat ini menghitung baris scanline langsung dari konstanta
+    // `TILE_HEIGHT`, bukan dari uniform ini.
+    tile_height: 8u32,
     segments_tex_width_bits: max_w.trailing_zeros(),
     segment_list_tex_width_bits: max_w.trailing_zeros(),
     encoded_paints_tex_width_bits: max_w.trailing_zeros(),
@@ -400,8 +404,11 @@ impl WebGlRenderer {
         self.gl.enable(WebGl2RenderingContext::DEPTH_TEST);
 self.gl.depth_mask(false);
         self.gl.enable(WebGl2RenderingContext::BLEND);
+        // Fragment shader mengeluarkan warna PREMULTIPLIED (rgb sudah dikali alpha*coverage),
+        // sehingga blending yang konsisten adalah (ONE, ONE_MINUS_SRC_ALPHA) — bukan
+        // (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) yang mengasumsikan sumber non-premultiplied.
         self.gl.blend_func(
-            WebGl2RenderingContext::SRC_ALPHA,
+            WebGl2RenderingContext::ONE,
             WebGl2RenderingContext::ONE_MINUS_SRC_ALPHA,
         );
 

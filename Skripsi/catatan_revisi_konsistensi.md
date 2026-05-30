@@ -4,7 +4,7 @@
 
 ## Ringkasan
 
-Sepuluh perbaikan diterapkan: enam terkait konsistensi antar-bab (#1–#6), satu personalisasi Kata Pengantar (#7), dan tiga perbaikan akurasi/kerapian tambahan (#8 jumlah dependensi, #9 sitasi Blaze/FreeType, #10 penandaan dokumen kerja usang). Seluruh perbaikan menyangkut keselarasan antar-dokumen dan akurasi rujukan, bukan kebenaran teknis inti — substansi dan kejujuran ilmiah skripsi sudah baik sebelum revisi.
+Dua belas perbaikan diterapkan: enam terkait konsistensi antar-bab (#1–#6), satu personalisasi Kata Pengantar (#7), tiga perbaikan akurasi/kerapian tambahan (#8 jumlah dependensi, #9 sitasi Blaze/FreeType, #10 penandaan dokumen kerja usang), satu koreksi akurasi metodologi benchmark (#11 anggaran sampel adaptif), dan satu pembersihan kode pra-sidang (#12 dead code ukuran ubin, blend func premultiplied, komentar usang harness). Seluruh perbaikan menyangkut keselarasan antar-dokumen, akurasi rujukan/metodologi, dan keselarasan kode-naskah, bukan kebenaran teknis inti — substansi dan kejujuran ilmiah skripsi sudah baik sebelum revisi.
 
 ---
 
@@ -122,6 +122,34 @@ Sitasi dalam teks ditambahkan pada ketiga lokasi: Bab 2.1.10 (FreeType, Skia), B
 
 ---
 
+## #11 — Anggaran sampel benchmark tidak akurat (Bab 4.4.1 & 4.4.2)
+
+**Masalah.** Bab 4.4.1 menyatakan setiap aset diukur dengan "tiga puluh *frame* pemanasan + seratus dua puluh *frame* terukur", dan paragraf pembuka 4.4.2 beserta caption Tabel 4.4 menyebut angka itu sebagai "rerata tiga pengulangan, masing-masing atas 120 *frame* terukur." Verifikasi terhadap `examples/bench_webgl/src/lib.rs` menunjukkan anggaran sampel bersifat ADAPTIF lewat fungsi `budget_for`: aset di bawah `HEAVY_OPS_THRESHOLD = 5.000` ops memakai `WARMUP = 30` + `SAMPLES = 120`, sedangkan aset berat di atas ambang memakai `HEAVY_WARMUP = 5` + `HEAVY_SAMPLES = 20`. Karena `paris-30k.svg` memiliki 50.620 ops, baris paling penting pada Tabel 4.4 (argumen *bottleneck* CPU) sebenarnya diukur pada 5 + 20, bukan 30 + 120. Selain itu klaim "tiga pengulangan" tidak terenkode di harness (harness berjalan sekali per aset lalu melapor min/median/mean).
+
+**Solusi.** Bab 4.4.1 ditulis ulang untuk mendeskripsikan anggaran adaptif `budget_for` secara eksplisit (ambang 5.000 ops; ringan 30+120; berat 5+20) beserta alasan determinisme beban CPU. Paragraf pembuka 4.4.2 dan caption Tabel 4.4 dikoreksi: frasa "rerata tiga pengulangan" dihapus dan diganti pernyataan jumlah sampel per aset (120 untuk el_gato dan Ghostscript_Tiger; 20 untuk paris-30k). Angka pada Tabel 4.4 tidak diubah — hanya deskripsi metodologinya yang diselaraskan dengan kode.
+
+**Berkas terdampak.** `bab4_implementasi_dan_hasil.md`
+
+---
+
+## #12 — Pembersihan kode agar selaras dengan naskah (pra-sidang)
+
+**Masalah.** Tiga celah kode yang berpotensi memancing pertanyaan penguji saat membuka repo:
+1. **Dead code ukuran ubin.** `src/lib.rs` mendeklarasikan `TILE_WIDTH = 4.0` dan `TILE_HEIGHT = 4.0`, serta `src/render/webgl.rs` menyetel `tile_height: 4u32` pada Config UBO — padahal ubin efektif yang dipakai pipeline adalah 16×8 (`TILE_W`/`TILE_H` di `blocks.rs`/`builder.rs` dan `#define TILE_WIDTH 16u`/`TILE_HEIGHT 8u` di kedua shader). Angka "4" bisa disalahartikan sebagai inkonsistensi terhadap klaim 16×8 di naskah.
+2. **Blend func vs klaim premultiplied alpha.** Naskah (Bab 3.4.2/3.4.3) menyebut output "premultiplied alpha" (benar: shader mengeluarkan `rgb*a*coverage`), tetapi `webgl.rs` memakai `blend_func(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)` yang mengasumsikan sumber non-premultiplied.
+3. **Komentar usang harness.** Komentar kepala `examples/bench_webgl/src/lib.rs` menyebut aset Tiger/SVG Logo/Bismillah, padahal yang di-benchmark adalah Tiger/el_gato/paris (SVG Logo & Bismillah hanya capture-only untuk Bab 4.6).
+
+**Solusi.**
+1. Konstanta `TILE_WIDTH`/`TILE_HEIGHT` (4.0) dihapus dari `src/lib.rs` beserta import-nya yang tak terpakai di `src/tile.rs`; ditambahkan komentar yang mengarahkan ke `TILE_W`/`TILE_H` di `blocks.rs`. Field `tile_height` pada Config UBO dipertahankan (untuk menjaga layout std140 tetap selaras byte-per-byte dengan shader) namun nilainya dikoreksi `4u32 → 8u32` dengan komentar penjelas bahwa shader menghitung scanline dari `#define TILE_HEIGHT 8u`, bukan dari uniform ini. Struct legacy `common::Tile` (4-px) dan konstanta `WIDTH`/`HEIGHT`/`PIXEL_ROWS = 4` ditandai sebagai prototipe lama yang tidak dipakai jalur render aktif (dikonfirmasi oleh warning kompilator `struct Tile is never constructed`).
+2. Blend func diubah menjadi `blend_func(ONE, ONE_MINUS_SRC_ALPHA)` agar konsisten dengan keluaran premultiplied shader, disertai komentar. Untuk warna solid opak (alpha=1) hasil visual identik dengan sebelumnya, sehingga aset uji tidak terpengaruh; perbaikan ini benar untuk bidang semi-transparan.
+3. Komentar kepala harness diperbarui agar menyebut aset yang benar (Tiger/el_gato/paris di-time; SVG Logo/Bismillah capture-only).
+
+**Verifikasi.** `cargo check -p arabella --lib --target wasm32-unknown-unknown --features webgl` berhasil (exit 0); tidak ada error baru, hanya warning dead-code/unused-import yang sudah ada sebelumnya.
+
+**Berkas terdampak.** `src/lib.rs`, `src/tile.rs`, `src/render/webgl.rs`, `src/render/common.rs`, `examples/bench_webgl/src/lib.rs`
+
+---
+
 ## Catatan tindak lanjut
 
-Seluruh item #1–#10 telah dikerjakan dan tidak ada lagi yang menggantung. Nama pengembang Blaze (Aurimas Gasiulis) sudah dikonfirmasi, sehingga seluruh entri sitasi telah terverifikasi.
+Seluruh item #1–#12 telah dikerjakan dan tidak ada lagi yang menggantung. Nama pengembang Blaze (Aurimas Gasiulis) sudah dikonfirmasi, sehingga seluruh entri sitasi telah terverifikasi. Item #11 menyelaraskan deskripsi metodologi benchmark dengan anggaran sampel adaptif yang benar-benar dikodekan pada harness; item #12 membersihkan tiga celah kode (dead code ukuran ubin, blend func premultiplied, komentar usang harness) agar source code selaras dengan naskah menjelang sidang.

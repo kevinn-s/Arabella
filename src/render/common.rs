@@ -36,6 +36,10 @@ pub struct RenderSize {
 pub struct Config {
     pub width: u32,
     pub height: u32,
+    /// Tinggi ubin dalam piksel (TILE_H = 8). Bagian dari layout UBO std140 yang
+    /// harus selaras byte-per-byte dengan blok `config` di shader. Shader saat ini
+    /// menghitung baris scanline dari `#define TILE_HEIGHT 8u`, bukan dari uniform
+    /// ini, namun field tetap dipertahankan agar offset uniform lain tidak bergeser.
     pub tile_height: u32,
     pub segments_tex_width_bits: u32,
     pub segment_list_tex_width_bits: u32,
@@ -46,6 +50,11 @@ pub struct Config {
 
 
 
+/// Struct ubin warisan (legacy) dari kerangka awal. **Tidak dipakai** oleh jalur
+/// render aktif — pipeline memakai `crate::tile::Tile` (44 byte, ubin 16x8) yang
+/// diunggah ke GPU. Struct ini dipertahankan sebagai referensi historis saja;
+/// konstanta `WIDTH`/`HEIGHT`/`PIXEL_ROWS` di bawah TIDAK mencerminkan ukuran ubin
+/// efektif (16x8), melainkan nilai prototipe lama.
 pub struct Tile {
     pub x: u16,
     pub y: u16,
@@ -61,10 +70,10 @@ pub struct Tile {
 }
 
 impl Tile {
-    /// The width of a tile in pixels.
+    /// Lebar ubin prototipe lama (TIDAK dipakai; ubin efektif lebar 16 piksel).
     pub const WIDTH: u16 = 4;
 
-    /// The height of a tile in pixels.
+    /// Tinggi ubin prototipe lama (TIDAK dipakai; ubin efektif tinggi 8 piksel).
     pub const HEIGHT: u16 = 4;
     pub const PIXEL_ROWS: usize = 4;
 }

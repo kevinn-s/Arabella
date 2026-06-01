@@ -132,14 +132,15 @@
 //  Kerangka navigasi & utilitas umum
 // ════════════════════════════════════════════════════════════════════════
 const DEMOS = [
-  { id: "overview",  title: "Gambaran Pipeline" },
-  { id: "flatten",   title: "Flattening Kurva" },
-  { id: "cubic",     title: "Kubik → Kuadratik" },
-  { id: "dda",       title: "DDA Tile Binning" },
-  { id: "winding",   title: "Winding Per-Scanline" },
-  { id: "backdrop",  title: "Propagasi Backdrop" },
-  { id: "linebox",   title: "Coverage GPU (line_box)" },
-  { id: "fillrule",  title: "Fill Rule" },
+  { id: "overview",    title: "Gambaran Pipeline" },
+  { id: "flatten",     title: "Flattening Kurva" },
+  { id: "cubic",       title: "Kubik → Kuadratik" },
+  { id: "dda",         title: "DDA Tile Binning" },
+  { id: "winding",     title: "Winding Per-Scanline" },
+  { id: "backdrop",    title: "Propagasi Backdrop" },
+  { id: "gpupipeline", title: "Pipeline GPU" },
+  { id: "linebox",     title: "Coverage GPU (line_box)" },
+  { id: "fillrule",    title: "Fill Rule" },
 ];
 
 const nav = document.getElementById("nav");
@@ -210,7 +211,7 @@ const lerpPt = (p, q, t) => ({ x: lerp(p.x, q.x, t), y: lerp(p.y, q.y, t) });
     ["3", "cpu", "DDA Tile Binning", "Tiap garis didaftarkan ke petak 16×8 yang dilewatinya", "dda"],
     ["4", "cpu", "Winding per-scanline", "Hitung luas bertanda tiap garis di tiap baris piksel", "winding"],
     ["5", "cpu", "Propagasi backdrop", "Teruskan winding antar petak, kiri → kanan", "backdrop"],
-    ["6", "gpu", "Upload + Instancing", "Kirim tile & segmen ke GPU, gambar semua quad sekaligus", null],
+    ["6", "gpu", "Upload + Instancing", "Kirim tile & segmen ke GPU, gambar semua quad sekaligus", "gpupipeline"],
     ["7", "gpu", "Fragment Shader", "Hitung coverage tiap piksel (line_box) + fill rule", "linebox"],
   ];
   const flow = root.querySelector("#flow");
@@ -752,6 +753,308 @@ const lerpPt = (p, q, t) => ({ x: lerp(p.x, q.x, t), y: lerp(p.y, q.y, t) });
     autoId=setInterval(()=>{if(cur<N-1){cur++;draw();}else{clearInterval(autoId);autoId=null;
       root.querySelector("#bd-auto").textContent="⏩ Jalankan otomatis";}},700);};
   draw();
+})();
+</script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════
+//  DEMO 5b — Pipeline GPU: Upload + Vertex Buffer + Texture + Instancing
+//  Ilustrasi src/render/webgl.rs : upload_tiles, draw_arrays_instanced
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  const root = document.getElementById("demo-gpupipeline");
+  root.innerHTML = `
+    <h2 class="title">Pipeline GPU: Upload & Instanced Drawing</h2>
+    <div class="tag">Sumber: <code>src/render/webgl.rs</code> · upload_tiles · draw_arrays_instanced</div>
+    <p class="lead">Setelah CPU selesai menyiapkan semua <code>Tile</code>, data dikirim ke GPU
+       dalam dua wadah: <b>vertex buffer</b> (daftar tile) dan <b>texture RGBA32F</b> (daftar segmen
+       garis). Lalu satu perintah <code>drawArraysInstanced</code> menggambar semua tile sekaligus.</p>
+
+    <div class="card">
+      <h3>Animasi: dari CPU ke GPU</h3>
+      <canvas id="gp-cv" width="820" height="310"></canvas>
+      <div class="stepbar" style="margin-top:12px">
+        <button id="gp-play" class="primary">▶ Jalankan animasi</button>
+        <button id="gp-reset">↺ Reset</button>
+      </div>
+      <div class="explain" id="gp-msg">Tekan "Jalankan animasi" untuk melihat alur upload data ke GPU.</div>
+    </div>
+
+    <div class="card">
+      <h3>Struktur data yang dikirim ke GPU</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px">
+        <div>
+          <div class="explain" style="margin:0 0 10px">
+            <b style="color:var(--accent)">Vertex Buffer</b> — satu entri per Tile<br>
+            <span class="muted" style="font-size:12px">Tiap tile = 1 instance quad (4 vertex)</span>
+          </div>
+          <table class="data">
+            <thead><tr><th>field</th><th>tipe</th><th>isi</th></tr></thead>
+            <tbody>
+              <tr><td><code>tile_xy</code></td><td>vec2</td><td>posisi petak (col, row)</td></tr>
+              <tr><td><code>backdrop</code></td><td>float[8]</td><td>winding awal per scanline</td></tr>
+              <tr><td><code>seg_start</code></td><td>uint</td><td>indeks awal di texture segmen</td></tr>
+              <tr><td><code>seg_count</code></td><td>uint</td><td>jumlah segmen di petak ini</td></tr>
+              <tr><td><code>color</code></td><td>vec4</td><td>warna RGBA bentuk</td></tr>
+              <tr><td><code>fill_rule</code></td><td>uint</td><td>0=NonZero, 1=EvenOdd</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div class="explain" style="margin:0 0 10px">
+            <b style="color:var(--accent2)">Texture RGBA32F</b> — satu texel per segmen garis<br>
+            <span class="muted" style="font-size:12px">Tiap texel = 4 float = p0.x, p0.y, p1.x, p1.y</span>
+          </div>
+          <canvas id="gp-tex" width="400" height="120" style="width:100%;height:auto"></canvas>
+          <div class="legend" style="margin-top:8px">
+            <span><i class="swatch" style="background:#5db0ff"></i> texel berisi segmen garis</span>
+            <span><i class="swatch" style="background:#1f232c"></i> texel kosong (padding)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Kenapa Instancing?</h3>
+      <div class="explain green">
+        Tanpa instancing: CPU harus memanggil <code>drawArrays</code> ribuan kali (satu per tile) →
+        overhead besar karena tiap panggilan ada biaya komunikasi CPU↔GPU.<br><br>
+        Dengan <code>drawArraysInstanced(N)</code>: satu panggilan, GPU menggambar N tile sekaligus.
+        Tiap instance otomatis membaca data tile-nya sendiri dari vertex buffer via
+        <code>gl_InstanceID</code>.
+      </div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:12px">
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">❌ Tanpa instancing</div>
+          <pre style="margin:0;font-size:12px">for tile in tiles {
+    upload_uniforms(tile);
+    gl.drawArrays(TRIANGLE_STRIP, 0, 4);
+    // N panggilan → N × overhead
+}</pre>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:13px;color:var(--accent2);margin-bottom:6px">✅ Dengan instancing</div>
+          <pre style="margin:0;font-size:12px">upload_vertex_buffer(all_tiles);
+gl.drawArraysInstanced(
+    TRIANGLE_STRIP,
+    0, 4,      // 4 vertex per quad
+    N          // N tile sekaligus
+);
+// 1 panggilan saja</pre>
+        </div>
+      </div>
+      <p class="analogy">🚌 <b>Analogi:</b> daripada mengantar tiap penumpang satu per satu (N
+        perjalanan), kamu naik bus yang mengangkut semua penumpang sekaligus (1 perjalanan).
+        GPU adalah bus-nya — makin banyak penumpang (tile), makin besar keuntungannya.</p>
+    </div>
+
+    <div class="card">
+      <h3>Alur lengkap di <code>webgl.rs</code></h3>
+      <div class="flow" id="gp-flow"></div>
+    </div>`;
+
+  // ── Texture visualizer ──────────────────────────────────────────────
+  const texCv = root.querySelector("#gp-tex");
+  const texCtx = hidpi(texCv, 400, 120);
+  const TOTAL_TEXELS = 64, USED = 38;
+  (function drawTex(){
+    texCtx.clearRect(0,0,400,120);
+    const W=400, H=120, cols=16, rows=4, cw=W/cols, ch=H/rows;
+    for(let i=0;i<TOTAL_TEXELS;i++){
+      const c=i%cols, r=Math.floor(i/cols);
+      const used=i<USED;
+      texCtx.fillStyle=used?"rgba(93,176,255,0.55)":"#1f232c";
+      texCtx.fillRect(c*cw+1,r*ch+1,cw-2,ch-2);
+      if(used){
+        texCtx.fillStyle="#07101c";texCtx.font="8px monospace";texCtx.textAlign="center";
+        texCtx.fillText("s"+i,c*cw+cw/2,r*ch+ch/2+3);
+      }
+    }
+    texCtx.strokeStyle="#2a2f3a";texCtx.lineWidth=1;
+    for(let c=0;c<=cols;c++){texCtx.beginPath();texCtx.moveTo(c*cw,0);texCtx.lineTo(c*cw,H);texCtx.stroke();}
+    for(let r=0;r<=rows;r++){texCtx.beginPath();texCtx.moveTo(0,r*ch);texCtx.lineTo(W,r*ch);texCtx.stroke();}
+    texCtx.fillStyle="#9aa3b2";texCtx.font="10px monospace";texCtx.textAlign="left";
+    texCtx.fillText("Texture 1D (16×4 texels) — tiap texel = 1 segmen garis (p0.x, p0.y, p1.x, p1.y)",4,H-4);
+  })();
+
+  // ── Flow diagram ────────────────────────────────────────────────────
+  const flowSteps = [
+    ["1","cpu","Kumpulkan semua Tile dari builder","generate_tiles() → Vec<Tile>"],
+    ["2","cpu","Upload Vertex Buffer","gl.bufferData(ARRAY_BUFFER, tile_data)"],
+    ["3","cpu","Upload Texture Segmen","gl.texImage2D(TEXTURE_2D, seg_data) — RGBA32F"],
+    ["4","cpu","Bind shader program","gl.useProgram(render_program)"],
+    ["5","cpu","Set uniform: lebar/tinggi layar","gl.uniform2f(u_screen_size, w, h)"],
+    ["6","gpu","Vertex Shader × (4 × N_tiles)","Tempatkan 4 sudut quad tiap tile di layar"],
+    ["7","gpu","Rasterisasi","GPU interpolasi fragment untuk tiap piksel dalam quad"],
+    ["8","gpu","Fragment Shader × (N_piksel)","line_box + fill rule → warna akhir piksel"],
+  ];
+  const gf = root.querySelector("#gp-flow");
+  flowSteps.forEach((s,i)=>{
+    const d=el(`<div class="stage ${s[1]}">
+      <div class="num">${s[0]}</div>
+      <div class="lbl"><b>${s[2]}</b><div><code>${s[3]}</code></div></div>
+      <div style="margin-left:auto;font-size:11px;color:var(--muted)">${s[1].toUpperCase()}</div>
+    </div>`);
+    gf.appendChild(d);
+    if(i<flowSteps.length-1) gf.appendChild(el(`<div class="arrow">▼</div>`));
+  });
+
+  // ── Main animation: CPU → GPU data transfer ─────────────────────────
+  const cv = root.querySelector("#gp-cv");
+  const ctx = hidpi(cv, 820, 310);
+
+  // Tile grid: 7 tiles across, 3 rows = 21 tiles total (demo)
+  const TCOLS=7, TROWS=3, TW=80, TH=70, TPAD=10;
+  const GRID_X=20, GRID_Y=20;
+  const tiles=[];
+  for(let r=0;r<TROWS;r++) for(let c=0;c<TCOLS;c++){
+    const segs=Math.floor(Math.random()*4); // 0..3 segments
+    const hasContent=segs>0||(Math.random()<0.4);
+    tiles.push({col:c,row:r,segs,hasContent,
+      color:`hsl(${200+c*15+r*30},60%,55%)`,
+      state:"idle"}); // idle | uploading | done
+  }
+
+  // GPU panel position
+  const GPU_X=600, GPU_Y=20, GPU_W=200, GPU_H=270;
+
+  let step=0, animId=null;
+  // steps: 0=idle, 1..N=uploading tile i, N+1=draw call, N+2=done
+  const N=tiles.length;
+
+  function drawScene(){
+    ctx.clearRect(0,0,820,310);
+
+    // ── CPU side label ──
+    ctx.fillStyle="#9aa3b2";ctx.font="bold 12px monospace";ctx.textAlign="left";
+    ctx.fillText("CPU (Vertex Buffer)",GRID_X,14);
+
+    // ── Tile grid ──
+    tiles.forEach((t,i)=>{
+      const x=GRID_X+t.col*(TW+TPAD), y=GRID_Y+t.row*(TH+TPAD)+18;
+      const done=t.state==="done", uploading=t.state==="uploading";
+      ctx.fillStyle=done?"rgba(93,176,255,0.22)":uploading?"rgba(255,180,84,0.30)":"rgba(30,35,44,0.9)";
+      ctx.strokeStyle=done?"#5db0ff":uploading?"#ffb454":"#2a2f3a";
+      ctx.lineWidth=done||uploading?2:1;
+      ctx.beginPath();ctx.roundRect(x,y,TW,TH,6);ctx.fill();ctx.stroke();
+      // tile label
+      ctx.fillStyle=done?"#5db0ff":uploading?"#ffb454":"#9aa3b2";
+      ctx.font="bold 10px monospace";ctx.textAlign="center";
+      ctx.fillText(`T${i}`,x+TW/2,y+18);
+      // segs indicator
+      ctx.fillStyle="#9aa3b2";ctx.font="9px monospace";
+      ctx.fillText(`${t.segs} seg`,x+TW/2,y+32);
+      // color swatch
+      ctx.fillStyle=t.color;ctx.beginPath();ctx.roundRect(x+TW/2-14,y+40,28,12,3);ctx.fill();
+      // flying packet animation
+      if(uploading){
+        const prog=(Date.now()%600)/600;
+        const tx=lerp(x+TW,GPU_X,prog), ty=lerp(y+TH/2,GPU_Y+GPU_H/2,prog);
+        ctx.fillStyle="#ffb454";ctx.beginPath();ctx.arc(tx,ty,5,0,7);ctx.fill();
+        ctx.strokeStyle="rgba(255,180,84,0.4)";ctx.lineWidth=1;ctx.setLineDash([3,3]);
+        ctx.beginPath();ctx.moveTo(x+TW,y+TH/2);ctx.lineTo(GPU_X,GPU_Y+GPU_H/2);ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    });
+
+    // ── GPU panel ──
+    const gpuDone=step>N;
+    ctx.fillStyle="rgba(126,231,135,0.07)";
+    ctx.strokeStyle=gpuDone?"#7ee787":"#2a2f3a";ctx.lineWidth=gpuDone?2:1;
+    ctx.beginPath();ctx.roundRect(GPU_X,GPU_Y,GPU_W,GPU_H,10);ctx.fill();ctx.stroke();
+    ctx.fillStyle="#7ee787";ctx.font="bold 12px monospace";ctx.textAlign="center";
+    ctx.fillText("GPU",GPU_X+GPU_W/2,GPU_Y+18);
+
+    // vertex buffer bar
+    const vbDone=step>0;
+    ctx.fillStyle=vbDone?"rgba(93,176,255,0.3)":"rgba(30,35,44,0.8)";
+    ctx.strokeStyle=vbDone?"#5db0ff":"#2a2f3a";ctx.lineWidth=1;
+    ctx.beginPath();ctx.roundRect(GPU_X+10,GPU_Y+28,GPU_W-20,36,6);ctx.fill();ctx.stroke();
+    ctx.fillStyle=vbDone?"#5db0ff":"#9aa3b2";ctx.font="11px monospace";ctx.textAlign="center";
+    ctx.fillText("Vertex Buffer",GPU_X+GPU_W/2,GPU_Y+44);
+    if(vbDone){ctx.fillStyle="#9aa3b2";ctx.font="9px monospace";
+      ctx.fillText(`${Math.min(step,N)} / ${N} tile`,GPU_X+GPU_W/2,GPU_Y+58);}
+
+    // texture bar
+    const texDone=step>0;
+    ctx.fillStyle=texDone?"rgba(126,231,135,0.25)":"rgba(30,35,44,0.8)";
+    ctx.strokeStyle=texDone?"#7ee787":"#2a2f3a";ctx.lineWidth=1;
+    ctx.beginPath();ctx.roundRect(GPU_X+10,GPU_Y+74,GPU_W-20,36,6);ctx.fill();ctx.stroke();
+    ctx.fillStyle=texDone?"#7ee787":"#9aa3b2";ctx.font="11px monospace";ctx.textAlign="center";
+    ctx.fillText("Texture RGBA32F",GPU_X+GPU_W/2,GPU_Y+90);
+    if(texDone){ctx.fillStyle="#9aa3b2";ctx.font="9px monospace";
+      ctx.fillText("segmen garis",GPU_X+GPU_W/2,GPU_Y+104);}
+
+    // draw call box
+    const drawDone=step>N;
+    ctx.fillStyle=drawDone?"rgba(255,180,84,0.25)":"rgba(30,35,44,0.8)";
+    ctx.strokeStyle=drawDone?"#ffb454":"#2a2f3a";ctx.lineWidth=drawDone?2:1;
+    ctx.beginPath();ctx.roundRect(GPU_X+10,GPU_Y+120,GPU_W-20,50,6);ctx.fill();ctx.stroke();
+    ctx.fillStyle=drawDone?"#ffb454":"#9aa3b2";ctx.font="bold 11px monospace";ctx.textAlign="center";
+    ctx.fillText("drawArraysInstanced",GPU_X+GPU_W/2,GPU_Y+140);
+    ctx.fillStyle="#9aa3b2";ctx.font="9px monospace";
+    ctx.fillText(`(TRIANGLE_STRIP, 0, 4, ${N})`,GPU_X+GPU_W/2,GPU_Y+156);
+
+    // result
+    if(drawDone){
+      ctx.fillStyle="rgba(126,231,135,0.15)";
+      ctx.strokeStyle="#7ee787";ctx.lineWidth=2;
+      ctx.beginPath();ctx.roundRect(GPU_X+10,GPU_Y+182,GPU_W-20,50,6);ctx.fill();ctx.stroke();
+      ctx.fillStyle="#7ee787";ctx.font="bold 12px monospace";ctx.textAlign="center";
+      ctx.fillText("🎉 Piksel di layar",GPU_X+GPU_W/2,GPU_Y+204);
+      ctx.fillStyle="#9aa3b2";ctx.font="9px monospace";
+      ctx.fillText(`${N} tile dirender sekaligus`,GPU_X+GPU_W/2,GPU_Y+220);
+    }
+
+    // step counter
+    ctx.fillStyle="#9aa3b2";ctx.font="11px monospace";ctx.textAlign="left";
+    const msgs=["Siap — tekan Jalankan",
+      ...tiles.map((_,i)=>`Upload tile T${i} ke vertex buffer & texture`),
+      `drawArraysInstanced(${N}) — GPU render semua tile sekaligus`,
+      "Selesai! Semua piksel telah diwarnai oleh GPU."];
+    root.querySelector("#gp-msg").textContent=msgs[Math.min(step,msgs.length-1)];
+  }
+
+  function tick(){
+    // update tile states
+    tiles.forEach((t,i)=>{
+      if(i<step-1) t.state="done";
+      else if(i===step-1) t.state="uploading";
+      else t.state="idle";
+    });
+    drawScene();
+    if(step<=N+1) requestAnimationFrame(()=>{});
+  }
+
+  // redraw loop for flying packet animation
+  let rafId=null;
+  function loop(){rafId=requestAnimationFrame(loop);drawScene();}
+
+  root.querySelector("#gp-play").onclick=function(){
+    if(animId){clearInterval(animId);animId=null;cancelAnimationFrame(rafId);
+      this.textContent="▶ Jalankan animasi";return;}
+    step=0;tiles.forEach(t=>t.state="idle");
+    this.textContent="⏸ Berhenti";
+    loop();
+    animId=setInterval(()=>{
+      step++;
+      tiles.forEach((t,i)=>{
+        if(i<step-1) t.state="done";
+        else if(i===step-1) t.state="uploading";
+        else t.state="idle";
+      });
+      if(step>N+1){clearInterval(animId);animId=null;cancelAnimationFrame(rafId);rafId=null;
+        root.querySelector("#gp-play").textContent="▶ Jalankan animasi";
+        tiles.forEach(t=>t.state="done");drawScene();}
+    },350);
+  };
+  root.querySelector("#gp-reset").onclick=()=>{
+    if(animId){clearInterval(animId);animId=null;}
+    if(rafId){cancelAnimationFrame(rafId);rafId=null;}
+    root.querySelector("#gp-play").textContent="▶ Jalankan animasi";
+    step=0;tiles.forEach(t=>t.state="idle");drawScene();
+  };
+  drawScene();
 })();
 </script>
 

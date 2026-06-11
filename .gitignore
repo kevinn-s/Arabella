@@ -22,3 +22,6 @@ npm-debug.log*
 *.swp
 *.swo
 .env
+
+# --- Catatan pribadi (tidak ikut di-push) ---
+Skripsi/alternateVersion/apakah bab 5 sangat terlihat buatan.txt

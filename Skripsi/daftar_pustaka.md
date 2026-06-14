@@ -1,16 +1,22 @@
 # Daftar Pustaka
 
+Akenine-Möller, T., Haines, E., Hoffman, N., Pesce, A., Iwanicki, M., & Hillaire, S. (2018). *Real-Time Rendering* (4th ed.). Boca Raton: A K Peters/CRC Press.
+
 Farin, G. (2002). *Curves and Surfaces for CAGD: A Practical Guide* (5th ed.). San Francisco: Morgan Kaufmann Publishers.
 
 Ganacim, F., Lima, R. S., de Figueiredo, L. H., & Nehab, D. (2014). Massively-parallel vector graphics. *ACM Transactions on Graphics*, 33(6), 1–14.
 
 Gasiulis, A. (2024). *Blaze: Multi-threaded, CPU-based vector graphics rasterizer* [Perangkat lunak]. GitHub. Diakses dari https://github.com/aurimasg/blaze
 
+Hales, T. C. (2007). The Jordan curve theorem, formally and informally. *The American Mathematical Monthly*, 114(10), 882–894.
+
 International Business Machines Corporation. (2022). *What is parallel computing?* IBM Documentation. Diakses dari https://www.ibm.com/topics/parallel-computing
 
 Khronos Group. (2016). *Vulkan 1.0 Specification*. The Khronos Group Inc. Diakses dari https://registry.khronos.org/vulkan/specs/1.0/html/vkspec.html
 
 Khronos Group. (2022). *WebGL 2.0 Specification*. The Khronos Group Inc. Diakses dari https://registry.khronos.org/webgl/specs/latest/2.0/
+
+Klabnik, S., & Nichols, C. (2022). *The Rust Programming Language* (2nd ed.). San Francisco: No Starch Press.
 
 Kokojima, Y., Sugita, K., Saito, T., & Takemoto, T. (2006). Resolution independent rendering of deformable vector objects using graphics hardware. *ACM SIGGRAPH 2006 Sketches (SIGGRAPH '06)*. Boston, Massachusetts.
 

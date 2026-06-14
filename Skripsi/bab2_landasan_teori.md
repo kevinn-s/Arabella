@@ -2,25 +2,33 @@
 
 ## 2.1 Landasan Teoritis
 
-### 2.1.1 Kurva Bezier
+### 2.1.1 Polinomial Bernstein
 
-Kurva Bezier adalah garis lengkung yang halus yang didefinisikan oleh rumus matematika dan titik-titik kontrol. Kurva Bezier menggunakan polinomial Bernstein sebagai basis. Sebuah kurva bezier dengan derajat n (order n + 1) direpresentasikan sebagai:
+Polinomial Bernstein adalah keluarga polinomial basis yang menjadi fondasi matematis bagi representasi kurva Bézier. Untuk derajat $n$, terdapat $n + 1$ polinomial Bernstein yang didefinisikan sebagai (Farin, 2002):
+
+$$B_{i,n}(t) = \binom{n}{i} t^i (1-t)^{n-i}, \quad i = 0, 1, \ldots, n, \quad 0 \leq t \leq 1$$
+
+dengan $\binom{n}{i}$ menyatakan koefisien binomial. Polinomial Bernstein memiliki sejumlah sifat penting yang menjadikannya basis ideal untuk desain geometri. Pertama, sifat non-negativitas: setiap $B_{i,n}(t) \geq 0$ pada selang $[0, 1]$. Kedua, sifat partisi kesatuan (partition of unity), yaitu jumlah seluruh polinomial basis pada sembarang nilai $t$ selalu sama dengan satu:
+
+$$\sum_{i=0}^{n} B_{i,n}(t) = 1$$
+
+Kombinasi kedua sifat ini menjamin bahwa setiap titik pada kurva merupakan kombinasi konveks (convex combination) dari titik-titik kontrolnya, sehingga kurva selalu berada di dalam convex hull titik-titik kontrol. Sifat-sifat inilah yang membuat polinomial Bernstein menjadi dasar yang stabil secara numerik dan intuitif secara geometris bagi konstruksi kurva Bézier (Farin, 2002).
+
+### 2.1.2 Kurva Bézier
+
+Kurva Bézier adalah garis lengkung yang halus yang didefinisikan oleh rumus matematika dan titik-titik kontrol. Kurva Bézier menggunakan polinomial Bernstein (Subbab 2.1.1) sebagai basis. Sebuah kurva Bézier dengan derajat $n$ (order $n + 1$) direpresentasikan sebagai (Farin, 2002):
 
 $$r(t) = \sum_{i=0}^{n} b_i B_{i,n}(t), \quad 0 \leq t \leq 1$$
 
-Koefisiennya, $b_i$, merepresentasikan titik kontrol atau titik bezier. Bersama dengan polinomial bernstein $B_{i,n}(t)$:
+Koefisiennya, $b_i$, merepresentasikan titik kontrol atau titik Bézier, sedangkan $B_{i,n}(t)$ adalah polinomial basis Bernstein yang menentukan kontribusi setiap titik kontrol terhadap bentuk kurva. Keduanya secara bersama-sama menentukan bentuk akhir kurva. Dalam praktik grafis komputer, kurva Bézier kuadratik ($n = 2$) dan kubik ($n = 3$) paling lazim dipakai karena keseimbangan antara fleksibilitas bentuk dan kesederhanaan komputasi. Kurva Bézier memiliki sifat-sifat yang diwarisi dari basis Bernstein, antara lain selalu melewati titik kontrol pertama dan terakhir, bersinggungan dengan poligon kontrol pada kedua ujungnya, serta seluruhnya termuat di dalam convex hull titik-titik kontrolnya (Farin, 2002).
 
-$$B_{i,n}(t) = \binom{n}{i} t^i (1-t)^{n-i}, \quad i = 0, \ldots, n$$
-
-digunakan sebagai dasar untuk membangun kurva. Keduanya menentukan bentuk akhir kurva.
-
-### 2.1.2 Fungsi Implisit
+### 2.1.3 Fungsi Implisit
 
 Fungsi implisit merupakan fungsi dengan banyak variabel, di mana salah satu variabelnya merupakan fungsi dari kumpulan variabel lainnya. Berbeda dengan fungsi eksplisit yang memiliki bentuk umum, fungsi implisit menyajikan interaksi antar variabel dalam satu ruas persamaan, yang secara umum direpresentasikan sebagai:
 
 $$F(x, y) = 0$$
 
-### 2.1.3 Winding Number
+### 2.1.4 Winding Number
 
 Winding number merupakan konsep matematika untuk menyatakan berapa kali sebuah kurva tertutup melintasi titik acuan tertentu. Dalam sistem koordinat dua dimensi, nilai winding number ($\omega$) ditentukan oleh orientasi atau arah lintasan kurva:
 
@@ -29,7 +37,13 @@ Winding number merupakan konsep matematika untuk menyatakan berapa kali sebuah k
 
 Dalam bidang komputer grafis, aplikasi winding number digunakan sebagai alat penentu area dalam atau interior pada objek vektor yang kompleks. Konsep winding number juga menjadi fondasi bagi berbagai algoritma dengan tujuan yang serupa.
 
-### 2.1.4 Point-In-Polygon
+### 2.1.5 Teorema Kurva Jordan (Jordan Curve Theorem)
+
+Teorema Kurva Jordan (Jordan Curve Theorem) adalah teorema fundamental dalam topologi yang pertama kali dirumuskan oleh Camille Jordan pada tahun 1887. Teorema ini menyatakan bahwa setiap kurva Jordan — yaitu kurva tertutup sederhana pada bidang (kurva kontinu yang tidak memotong dirinya sendiri) — membagi bidang menjadi tepat dua daerah yang saling terpisah: sebuah daerah interior yang terbatas (bounded) dan dibatasi oleh kurva, serta sebuah daerah eksterior yang tak terbatas (unbounded). Setiap lintasan kontinu yang menghubungkan sebuah titik di daerah interior dengan sebuah titik di daerah eksterior pasti memotong kurva tersebut (Hales, 2007).
+
+Meskipun pernyataannya tampak jelas secara intuitif, pembuktian formalnya ternyata sangat tidak sepele dan menjadi tonggak penting dalam perkembangan matematika yang rigorous (Hales, 2007). Dalam konteks grafis komputer, Teorema Kurva Jordan memberikan landasan teoritis bagi konsep "dalam" dan "luar" sebuah bentuk vektor tertutup. Justru karena setiap kurva tertutup sederhana menjamin adanya pembagian interior–eksterior yang terdefinisi dengan baik, algoritma penentuan keterisian seperti point-in-polygon (Subbab 2.1.6) dan winding number (Subbab 2.1.4) memiliki dasar matematis yang sahih untuk memutuskan apakah suatu piksel berada di dalam atau di luar bentuk yang akan dirender.
+
+### 2.1.6 Point-In-Polygon
 
 Point-in-polygon adalah algoritma dalam komputasi geometri untuk menentukan apakah sebuah titik (koordinat x dan y) berada di dalam, luar, atau pada batas poligon. Algoritma ini banyak digunakan dalam berbagai bidang, seperti grafik komputer, pemrosesan vektor, sistem informasi geografis (GIS), dan simulasi fisika.
 
@@ -38,11 +52,11 @@ Beberapa metode umum yang digunakan untuk menentukan posisi titik relatif terhad
 1. **Ray Casting Algorithm** — Metode ini bekerja dengan menghitung berapa kali garis (ray) dari titik yang ingin diuji ke arah tertentu, misalnya horizontal ke kanan, mengenai sisi-sisi poligon. Jika jumlah interseksi ganjil, titik berada di dalam poligon; jika genap, titik berada di luar poligon.
 2. **Winding Number Algorithm** — Seperti yang dijelaskan di subbab sebelumnya, metode ini bekerja dengan mengevaluasi arah/orientasi setiap sisi poligon relatif terhadap titik. Hasil evaluasi menghasilkan angka yang disebut winding number. Jika hasilnya nol, titik berada di luar poligon. Jika bukan nol, titik berada di dalam poligon. Metode ini memiliki keunggulan dalam menangani poligon yang kompleks atau berlapis (self-intersecting polygons) dengan lebih tepat dibanding ray casting.
 
-### 2.1.5 Komputasi Parallel
+### 2.1.7 Komputasi Parallel
 
 Komputasi paralel, atau yang juga dikenal sebagai pemrograman paralel, adalah proses di mana masalah komputasi besar dipecah menjadi masalah-masalah kecil yang dapat diselesaikan secara bersamaan oleh beberapa prosesor [IBM, 2022]. Konsep ini memanfaatkan kemampuan prosesor modern, baik CPU multi-core maupun GPU, untuk mempercepat perhitungan yang bersifat independen atau memiliki pola data yang dapat dibagi. Dalam konteks grafis komputer, komputasi paralel sangat berguna untuk melakukan perhitungan vertex, fragment, atau operasi matematis kompleks seperti rasterisasi, evaluasi kurva, dan simulasi fisika secara efisien.
 
-### 2.1.6 Flattening Kurva melalui Subdivisi Adaptif
+### 2.1.8 Flattening Kurva melalui Subdivisi Adaptif
 
 Flattening adalah proses konversi kurva parametrik halus, seperti kurva Bézier, menjadi rangkaian segmen garis lurus (polyline) yang mendekati bentuk kurva asli dalam batas toleransi galat tertentu. Proses ini diperlukan karena sebagian besar perangkat rasterisasi bekerja jauh lebih efisien pada primitif garis lurus dibanding pada kurva derajat tinggi. Tantangan utamanya adalah memilih jumlah segmen yang memadai: terlalu sedikit menghasilkan tepi yang tampak bersudut (faceting), sedangkan terlalu banyak memboroskan komputasi tanpa peningkatan kualitas visual yang berarti.
 
@@ -50,41 +64,59 @@ Pendekatan yang lazim dipakai adalah subdivisi titik tengah (midpoint subdivisio
 
 Selain subdivisi langsung pada kurva kubik, sejumlah penelitian mutakhir terlebih dahulu mengonversi kurva kubik menjadi rangkaian kurva kuadratik sebelum di-flatten. Kurva kuadratik hanya memiliki satu titik kontrol sehingga uji kedataran dan pembelahannya lebih murah secara komputasi, sementara himpunan kurva kuadratik tetap mampu mendekati kurva kubik pada toleransi yang dikehendaki. Strategi dua tahap — kubik ke kuadratik, lalu kuadratik ke segmen garis — banyak diadopsi pada renderer vektor modern karena menyederhanakan jalur evaluasi tanpa mengorbankan akurasi.
 
-### 2.1.7 Representasi Bilangan Fixed-Point
+### 2.1.9 Representasi Bilangan Fixed-Point
 
 Fixed-point adalah skema representasi bilangan pecahan menggunakan tipe data bilangan bulat (integer), di mana sejumlah bit dialokasikan untuk bagian pecahan secara tetap. Sebuah format fixed-point dinotasikan sebagai $Q_{m.n}$, dengan $m$ bit untuk bagian bilangan bulat dan $n$ bit untuk bagian pecahan, sehingga sebuah nilai riil $x$ direpresentasikan sebagai bilangan bulat $\lfloor x \cdot 2^{n} \rceil$. Sebagai contoh, format 24.8 menyimpan nilai pada bilangan bulat 32-bit dengan delapan bit pecahan, sehingga satu satuan piksel setara dengan $2^{8} = 256$ unit fixed-point, sedangkan format 8.8 menyimpan nilai pada bilangan bulat 16-bit dengan delapan bit pecahan.
 
 Dibandingkan dengan bilangan floating-point, fixed-point menawarkan dua keunggulan penting dalam konteks rasterisasi. Pertama, operasi fixed-point bersifat deterministik: hasil penjumlahan dan perkalian tidak bergantung pada mode pembulatan floating-point yang dapat berbeda antar perangkat keras, sehingga geometri yang sama menghasilkan keluaran piksel yang identik di berbagai platform. Kedua, fixed-point menjaga presisi yang seragam pada rentang koordinat layar, berbeda dengan floating-point yang presisinya menurun seiring membesarnya magnitudo nilai. Karena itu, format fixed-point seperti 24.8 lazim dipakai sebagai representasi koordinat internal pada pustaka rasterisasi vektor untuk menjamin konsistensi dan kecepatan komputasi.
 
-### 2.1.8 Partisi Spasial Berbasis Ubin (Tiling)
+### 2.1.10 Partisi Spasial Berbasis Ubin (Tiling)
 
 Tiling adalah teknik partisi spasial yang membagi bidang gambar (kanvas) menjadi kisi-kisi sel persegi panjang berukuran tetap yang disebut ubin (tile). Setiap primitif geometri kemudian diasosiasikan hanya dengan ubin-ubin yang benar-benar dilintasinya, sehingga komputasi rasterisasi dapat dilokalisasi per ubin alih-alih diterapkan pada keseluruhan kanvas secara global. Pendekatan ini menjadi fondasi banyak arsitektur rendering modern karena beberapa alasan: ia membatasi cakupan kerja setiap unit pemrosesan pada wilayah kecil yang dapat ditampung dalam memori cache, memungkinkan ubin yang tidak tersentuh geometri dilewati sepenuhnya, dan menjadikan setiap ubin sebagai unit kerja independen yang ideal untuk dieksekusi secara paralel.
 
 Dalam praktik rendering vektor, ubin lazim diklasifikasikan secara konseptual berdasarkan relasinya terhadap geometri: ubin kosong yang tidak dilintasi bentuk apa pun, ubin interior yang sepenuhnya berada di dalam bentuk, dan ubin tepi (edge tile) yang dipotong oleh batas bentuk. Pemisahan ini memungkinkan ubin interior diisi warna secara langsung tanpa evaluasi geometri, sementara hanya ubin tepi yang memerlukan perhitungan cakupan yang lebih mahal. Ukuran ubin merupakan parameter desain yang menyeimbangkan dua hal yang bersaing: ubin yang lebih besar mengurangi overhead manajemen per ubin namun memperbesar potensi komputasi sia-sia (overdraw), sedangkan ubin yang lebih kecil melokalisasi kerja lebih ketat namun menambah jumlah ubin yang harus dikelola.
 
-### 2.1.9 Algoritma Digital Differential Analyzer (DDA)
+### 2.1.11 Algoritma Digital Differential Analyzer (DDA)
 
 Digital Differential Analyzer (DDA) adalah algoritma inkremental untuk menentukan sel-sel diskrit yang dilintasi sebuah garis lurus pada kisi reguler. Diberikan sebuah segmen garis dengan titik awal $(x_0, y_0)$ dan titik akhir $(x_1, y_1)$, DDA menelusuri garis tersebut dengan menambahkan kenaikan (increment) konstan pada satu sumbu dan kenaikan proporsional pada sumbu lainnya, sehingga setiap perpotongan garis dengan batas sel dapat dihitung secara berurutan tanpa operasi perkalian atau pembagian berulang pada loop inti. Varian DDA berbasis bilangan bulat, yang berkerabat dengan algoritma garis Bresenham, mempertahankan akumulator galat (error accumulator) untuk memutuskan kapan penelusuran berpindah sel, sehingga seluruh komputasi dapat dilakukan dalam aritmetika integer yang cepat dan bebas galat pembulatan.
 
 Dalam konteks partisi spasial berbasis ubin, DDA dipakai untuk proses binning, yaitu memetakan setiap segmen garis ke daftar ubin yang dilintasinya beserta titik perpotongan garis pada batas tiap ubin. Penelusuran semacam ini dapat disusun secara bertingkat: tahap pertama (outer DDA) menelusuri perpindahan garis melintasi baris-baris ubin secara vertikal, sedangkan tahap kedua (inner DDA) menelusuri perpindahan melintasi kolom-kolom ubin di dalam satu baris. Skema dua tingkat ini memecah sebuah segmen garis panjang menjadi potongan-potongan terklip per ubin secara efisien, yang kemudian menjadi masukan bagi tahap perhitungan cakupan dan winding number.
 
-### 2.1.10 Akumulator Signed-Area untuk Winding Number
+### 2.1.12 Akumulator Signed-Area untuk Winding Number
 
-Perhitungan winding number sebagaimana diuraikan pada Subbab 2.1.3 dapat direalisasikan secara efisien melalui akumulator signed-area (signed-area accumulator), sebuah teknik yang menjadi inti banyak rasterizer analitik seperti pada FreeType (The FreeType Project, 2023) dan Skia (The Skia Project, 2023). Alih-alih menghitung perpotongan sinar secara eksplisit untuk setiap piksel, metode ini mengakumulasi kontribusi luas bertanda (signed area) dari setiap segmen garis terhadap baris piksel (scanline) yang dilintasinya. Tanda kontribusi ditentukan oleh arah vertikal segmen — segmen yang bergerak menurun menyumbang nilai berlawanan tanda dengan segmen yang bergerak menaik — sehingga akumulasi tanda tersebut secara langsung mencerminkan nilai winding number sesuai orientasi lintasan kurva.
+Perhitungan winding number sebagaimana diuraikan pada Subbab 2.1.4 dapat direalisasikan secara efisien melalui akumulator signed-area (signed-area accumulator), sebuah teknik yang menjadi inti banyak rasterizer analitik seperti pada FreeType (The FreeType Project, 2023) dan Skia (The Skia Project, 2023). Alih-alih menghitung perpotongan sinar secara eksplisit untuk setiap piksel, metode ini mengakumulasi kontribusi luas bertanda (signed area) dari setiap segmen garis terhadap baris piksel (scanline) yang dilintasinya. Tanda kontribusi ditentukan oleh arah vertikal segmen — segmen yang bergerak menurun menyumbang nilai berlawanan tanda dengan segmen yang bergerak menaik — sehingga akumulasi tanda tersebut secara langsung mencerminkan nilai winding number sesuai orientasi lintasan kurva.
 
-Pada pendekatan per-scanline, setiap segmen garis didistribusikan ke baris-baris piksel yang dipotongnya, dan luas pertindihan vertikal segmen pada tiap baris ditambahkan ke akumulator baris yang bersangkutan. Karena luas bersifat kontinu, nilai cakupan yang dihasilkan secara alami memberikan antialiasing pada tepi bentuk tanpa memerlukan supersampling. Untuk efisiensi memori, kontribusi luas ini sering disimpan dalam format fixed-point seperti 8.8 (Subbab 2.1.7). Konsep pelengkapnya adalah backdrop, yaitu nilai winding awal yang diwarisi sebuah ubin dari seluruh geometri di sebelah kirinya pada baris yang sama. Dengan mempropagasikan backdrop secara inkremental dari kiri ke kanan sepanjang satu baris ubin, sebuah ubin interior yang tidak dilintasi tepi mana pun tetap dapat ditentukan keterisiannya hanya dari nilai backdrop yang merambat, tanpa perlu mengevaluasi ulang seluruh geometri.
+Pada pendekatan per-scanline, setiap segmen garis didistribusikan ke baris-baris piksel yang dipotongnya, dan luas pertindihan vertikal segmen pada tiap baris ditambahkan ke akumulator baris yang bersangkutan. Karena luas bersifat kontinu, nilai cakupan yang dihasilkan secara alami memberikan antialiasing pada tepi bentuk tanpa memerlukan supersampling. Untuk efisiensi memori, kontribusi luas ini sering disimpan dalam format fixed-point seperti 8.8 (Subbab 2.1.9). Konsep pelengkapnya adalah backdrop, yaitu nilai winding awal yang diwarisi sebuah ubin dari seluruh geometri di sebelah kirinya pada baris yang sama. Dengan mempropagasikan backdrop secara inkremental dari kiri ke kanan sepanjang satu baris ubin, sebuah ubin interior yang tidak dilintasi tepi mana pun tetap dapat ditentukan keterisiannya hanya dari nilai backdrop yang merambat, tanpa perlu mengevaluasi ulang seluruh geometri.
 
-### 2.1.11 Evaluasi Cakupan Piksel Analitik
+### 2.1.13 Evaluasi Cakupan Piksel Analitik
 
 Cakupan piksel (pixel coverage) adalah fraksi luas sebuah piksel yang tertutup oleh suatu bentuk, bernilai antara nol (piksel sepenuhnya di luar) hingga satu (piksel sepenuhnya di dalam). Nilai cakupan inilah yang menjadi dasar antialiasing berkualitas tinggi: tepi bentuk yang memotong sebagian piksel direpresentasikan dengan nilai cakupan pecahan, menghasilkan transisi warna yang halus alih-alih tepi bergerigi (aliasing). Pendekatan analitik menghitung cakupan ini secara eksak melalui integrasi geometris, berbeda dengan pendekatan supersampling yang mengaproksimasinya melalui pencuplikan banyak titik per piksel sehingga jauh lebih mahal.
 
-Salah satu cara menghitung cakupan analitik adalah melalui integral luas bertanda di bawah setiap segmen garis yang melintasi kotak piksel. Kontribusi setiap segmen terhadap luas tertutup di dalam piksel dapat dievaluasi dalam bentuk tertutup (closed form) menggunakan integrasi trapezoidal, lalu kontribusi seluruh segmen yang melintasi piksel dijumlahkan untuk memperoleh cakupan total. Keunggulan pendekatan ini adalah cakupan dihitung tepat dalam satu evaluasi per segmen tanpa pencuplikan berulang, sehingga sesuai untuk dieksekusi pada fragment shader pipeline rasterisasi konvensional. Hasil integrasi tersebut kemudian dipetakan menjadi koefisien cakupan akhir sesuai aturan pengisian (fill rule) yang berlaku, baik NonZero maupun EvenOdd, sebagaimana diuraikan pada konsep winding number di Subbab 2.1.3.
+Salah satu cara menghitung cakupan analitik adalah melalui integral luas bertanda di bawah setiap segmen garis yang melintasi kotak piksel. Kontribusi setiap segmen terhadap luas tertutup di dalam piksel dapat dievaluasi dalam bentuk tertutup (closed form) menggunakan integrasi trapezoidal, lalu kontribusi seluruh segmen yang melintasi piksel dijumlahkan untuk memperoleh cakupan total. Keunggulan pendekatan ini adalah cakupan dihitung tepat dalam satu evaluasi per segmen tanpa pencuplikan berulang, sehingga sesuai untuk dieksekusi pada fragment shader pipeline rasterisasi konvensional. Hasil integrasi tersebut kemudian dipetakan menjadi koefisien cakupan akhir sesuai aturan pengisian (fill rule) yang berlaku, baik NonZero maupun EvenOdd, sebagaimana diuraikan pada konsep winding number di Subbab 2.1.4.
 
-### 2.1.12 Single Instruction, Multiple Data (SIMD)
+### 2.1.14 Single Instruction, Multiple Data (SIMD)
 
-Single Instruction, Multiple Data (SIMD) adalah model komputasi paralel pada tingkat instruksi (instruction-level parallelism) di mana satu instruksi tunggal dieksekusi secara serentak terhadap beberapa elemen data sekaligus. Prosesor modern menyediakan register lebar — misalnya 128-bit — yang dapat menampung beberapa nilai sekaligus, seperti empat bilangan floating-point presisi tunggal atau delapan bilangan bulat 16-bit, lalu mengoperasikannya dalam satu siklus instruksi. Berbeda dengan paralelisme tingkat thread yang membagi pekerjaan antar unit pemrosesan terpisah (Subbab 2.1.5), SIMD mempercepat komputasi di dalam satu thread dengan memproses banyak elemen data per operasi.
+Single Instruction, Multiple Data (SIMD) adalah model komputasi paralel pada tingkat instruksi (instruction-level parallelism) di mana satu instruksi tunggal dieksekusi secara serentak terhadap beberapa elemen data sekaligus. Prosesor modern menyediakan register lebar — misalnya 128-bit — yang dapat menampung beberapa nilai sekaligus, seperti empat bilangan floating-point presisi tunggal atau delapan bilangan bulat 16-bit, lalu mengoperasikannya dalam satu siklus instruksi. Berbeda dengan paralelisme tingkat thread yang membagi pekerjaan antar unit pemrosesan terpisah (Subbab 2.1.7), SIMD mempercepat komputasi di dalam satu thread dengan memproses banyak elemen data per operasi.
 
 Dalam konteks pra-pemrosesan grafis vektor, SIMD sangat efektif untuk operasi yang bersifat seragam dan berulang atas banyak data, seperti transformasi affine terhadap deretan titik kontrol, evaluasi polinomial kurva pada banyak parameter sekaligus, serta akumulasi nilai winding antar-ubin. Operasi fused multiply-add (FMA), yang menggabungkan perkalian dan penjumlahan dalam satu instruksi terkurung, kerap dipakai bersama SIMD untuk mempercepat evaluasi matriks transformasi sekaligus menjaga presisi numerik. Pada lingkungan WebAssembly, kapabilitas SIMD diekspos melalui set instruksi SIMD128 yang menyediakan register 128-bit, sehingga optimasi tingkat instruksi semacam ini tetap dapat dimanfaatkan pada eksekusi di dalam peramban.
+
+### 2.1.15 Graphics Pipeline
+
+Graphics pipeline (pipeline grafis) adalah rangkaian tahapan terurut yang mengubah deskripsi geometri tiga atau dua dimensi beserta atributnya menjadi citra raster berupa piksel pada layar (Akenine-Möller dkk., 2018). Secara konseptual, pipeline ini terbagi menjadi beberapa tahap utama: tahap pemrosesan geometri (geometry processing) yang menangani transformasi vertex dari ruang model ke ruang layar, tahap rasterisasi (rasterization) yang menentukan piksel-piksel mana yang tercakup oleh setiap primitif, dan tahap pemrosesan piksel (pixel processing) yang menghitung warna akhir setiap piksel melalui operasi shading dan komposisi.
+
+Pada perangkat keras grafis modern, sebagian tahap pipeline ini bersifat dapat diprogram (programmable) melalui shader, sementara sebagian lainnya bersifat tetap (fixed-function). Vertex shader memproses setiap vertex secara independen, sedangkan fragment shader (disebut juga pixel shader) menghitung warna setiap fragmen yang dihasilkan rasterizer. Karakteristik penting dari pipeline grafis konvensional adalah sifat paralelnya yang masif: jutaan vertex dan fragmen dapat diproses secara bersamaan oleh banyak unit eksekusi GPU. Namun, pipeline rasterisasi konvensional dirancang untuk primitif sederhana seperti segitiga dan garis, sehingga rendering kurva vektor derajat tinggi memerlukan tahap pra-pemrosesan untuk mengubah kurva menjadi primitif yang dapat dicerna pipeline tersebut (Akenine-Möller dkk., 2018).
+
+### 2.1.16 WebGL 2.0
+
+WebGL 2.0 adalah antarmuka pemrograman aplikasi (API) grafis tingkat rendah berbasis JavaScript yang memungkinkan rendering grafis 2D dan 3D dengan akselerasi perangkat keras (GPU) langsung di dalam peramban web tanpa memerlukan plugin tambahan (Khronos Group, 2022). WebGL 2.0 dikembangkan dan distandarisasi oleh Khronos Group, dan secara teknis merupakan binding JavaScript dari OpenGL ES 3.0, sehingga mewarisi kapabilitas dan model pemrograman pipeline rasterisasi konvensional dari OpenGL ES.
+
+Dibandingkan dengan WebGL 1.0, versi 2.0 memperkenalkan sejumlah fitur penting seperti dukungan terhadap Vertex Array Objects (VAO), Transform Feedback, Uniform Buffer Objects (UBO), texture 3D, serta penanganan tekstur dan format data yang lebih kaya. Meski demikian, WebGL 2.0 tidak menyediakan compute shader sebagaimana yang tersedia pada API modern seperti Vulkan atau WebGPU. Keterbatasan ini menjadi pertimbangan arsitektural yang relevan: rendering grafis vektor yang membutuhkan komputasi paralel umum (general-purpose) tidak dapat sepenuhnya dialihkan ke GPU melalui WebGL 2.0, sehingga komputasi semacam itu perlu ditangani melalui jalur lain, misalnya di CPU, sebelum hasilnya diserahkan ke pipeline rasterisasi WebGL untuk digambar (Khronos Group, 2022).
+
+### 2.1.17 Rust
+
+Rust adalah bahasa pemrograman sistem (systems programming language) sumber terbuka yang menekankan tiga tujuan utama secara simultan: keamanan (safety), kecepatan (speed), dan konkurensi (concurrency) (Klabnik & Nichols, 2022). Keunggulan paling khas Rust terletak pada model kepemilikan (ownership) beserta sistem peminjaman (borrowing) dan masa hidup (lifetimes) yang diverifikasi oleh kompilator pada waktu kompilasi. Mekanisme ini menjamin keamanan memori (memory safety) dan keamanan thread (thread safety) tanpa memerlukan garbage collector, sehingga Rust mampu menghasilkan kinerja yang setara dengan C dan C++ namun dengan jaminan keselamatan yang jauh lebih kuat.
+
+Bagi penelitian rendering grafis berbasis paralelisasi CPU, Rust menawarkan kombinasi yang sangat sesuai. Jaminan thread safety pada waktu kompilasi — yang sering disebut "fearless concurrency" — memungkinkan penulisan kode multithreaded yang bebas dari data race tanpa mengorbankan kinerja (Klabnik & Nichols, 2022). Ekosistem Rust juga menyediakan pustaka seperti Rayon untuk paralelisme data yang ringkas (The Rust Project Developers, 2024), serta dukungan kompilasi ke target WebAssembly yang memungkinkan kode Rust dijalankan di dalam peramban dengan kinerja mendekati native. Kombinasi keamanan memori, kinerja tinggi, konkurensi yang aman, dan kemampuan kompilasi ke WebAssembly inilah yang menjadikan Rust pilihan tepat sebagai bahasa implementasi dalam penelitian ini.
 
 ## 2.2 Tinjauan Pustaka Terdahulu
 

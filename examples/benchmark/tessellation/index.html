@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PixiJS Benchmark — WebGL (earcut tessellation)</title>
+    <style>
+        html, body { margin: 0; padding: 0; background: #111; overflow: hidden; }
+    </style>
+</head>
+<body>
+    <!--
+      Tessellation comparison.
+
+      PixiJS's `preference: 'webgl'` backend converts each filled path into
+      triangles using the `earcut` ear-clipping tessellator, then submits
+      the triangle mesh to WebGL. This is the classic "tessellation-based
+      vector rendering" approach — contrast with arabella's analytic
+      tile-coverage method and vello's sparse-strip method.
+
+      Same Tiger SVG, same overlay, same controls.
+    -->
+    <script type="module">
+        import { runBenchmark } from '../shared/bench.js';
+        runBenchmark({
+            preference: 'webgl',
+            label: 'WebGL → earcut tessellation',
+        }).catch((e) => {
+            document.body.innerHTML =
+                '<pre style="color:#f66;padding:20px">' + e.stack + '</pre>';
+        });
+    </script>
+</body>
+</html>

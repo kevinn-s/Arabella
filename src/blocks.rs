@@ -20,19 +20,12 @@ pub const MAXIMUM_DELTA: i32 = 2048 << 8;
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Block {
-    /// Clipped line endpoints in tile-LOCAL F24Dot8 coordinates.
-    /// Range: x ∈ [0, TILE_W * 256], y ∈ [0, TILE_H * 256].
     pub p0x: i32,
     pub p0y: i32,
     pub p1x: i32,
     pub p1y: i32,
-    #[cfg(target_endian = "little")]
-    pub x: u16,
-    #[cfg(target_endian = "little")]
+
     pub y: u16,
-    #[cfg(target_endian = "big")]
-    pub y: u16,
-    #[cfg(target_endian = "big")]
     pub x: u16,
 }
 

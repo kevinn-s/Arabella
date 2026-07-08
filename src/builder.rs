@@ -267,25 +267,10 @@ impl Builder {
                             global_x as u16,
                             global_y as u16,
                         );
-                        web_sys::console::log_1(
-                            &alloc::format!(
-                                "[TILE-DUMP] tile=({},{}) global_pixel_y=[{}..{}] backdrop={:?} lines={}",
-                                global_x, global_y, tile_y_lo, tile_y_hi, acc_arr, block_count,
-                            )
-                            .into(),
-                        );
+                     
                         for k in block_start..(block_start + block_count) {
                             let b = &self.blocks.data[k];
-                            web_sys::console::log_1(
-                                &alloc::format!(
-                                    "    line[{}] tile-local F24Dot8: ({},{}) -> ({},{})  (px: ({:.3},{:.3})->({:.3},{:.3}))",
-                                    k - block_start,
-                                    b.p0x, b.p0y, b.p1x, b.p1y,
-                                    b.p0x as f32 / 256.0, b.p0y as f32 / 256.0,
-                                    b.p1x as f32 / 256.0, b.p1y as f32 / 256.0,
-                                )
-                                .into(),
-                            );
+                     
                         }
                     }
                 }
@@ -325,13 +310,7 @@ impl Builder {
                         ));
                     }
                 }
-                web_sys::console::log_1(
-                    &alloc::format!(
-                        "[ROW-BALANCE LEAK] tile_row={} (global_row={}) acc={:?} leaked:{}",
-                        row, global_row, acc_arr, leaked,
-                    )
-                    .into(),
-                );
+             
             }
         }
     }

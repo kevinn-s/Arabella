@@ -37,14 +37,10 @@ fn flatten_recursive<F>(
     F: FnMut(i32, i32, i32, i32),
 {
     if is_flat_enough(p0x, p0y, p1x, p1y, p2x, p2y) {
-        // Flat enough — emit as a line from p0 to p2.
         callback(p0x, p0y, p2x, p2y);
-        // web_sys::console::log_1(&format!("lines = {} {} {} {}", p0x, p0y, p2x, p2y).into());
 
     } else {
         // Not flat — split at midpoint (De Casteljau).
-        // Uses truncating division instead of arithmetic bit-shifts to eliminate 
-        // 1-bit coordinate drift discrepancies across signed viewport domains.
         let m01x = (p0x + p1x) / 2;
         let m01y = (p0y + p1y) / 2;
         let m12x = (p1x + p2x) / 2;
@@ -57,11 +53,6 @@ fn flatten_recursive<F>(
     }
 }
 
-/// Blaze's flatness test (from LinearizerUtils.h, IsQuadraticFlatEnough).
-///
-/// Computes L1 distance from the midpoint of the chord (p0→p2) to the
-/// control point p1. If this distance is within threshold, the curve
-/// is "flat enough" to approximate as a straight line from p0 to p2.
 #[inline(always)]
 fn is_flat_enough(
     p0x: i32, p0y: i32,

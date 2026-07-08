@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PixiJS Benchmark — Canvas2D (Chrome Skia)</title>
+    <style>
+        html, body { margin: 0; padding: 0; background: #111; overflow: hidden; }
+    </style>
+</head>
+<body>
+    <!--
+      "CanvasKit / Skia" comparison.
+
+      PixiJS's `preference: 'canvas'` backend draws through the browser's
+      native CanvasRenderingContext2D. In Chrome, that 2D context is
+      implemented by Skia — so this measures Skia's path rasterizer driving
+      the same Tiger SVG, with the same overlay + controls as arabella.
+
+      (Note: this is Chrome's *built-in* Skia, not the standalone CanvasKit
+      WASM build. The rasterization backend is the same Skia code; only the
+      packaging differs. See ../README.md.)
+    -->
+    <script type="module">
+        import { runBenchmark } from '../shared/bench.js';
+        runBenchmark({
+            preference: 'canvas',
+            label: 'Canvas2D → Skia',
+        }).catch((e) => {
+            document.body.innerHTML =
+                '<pre style="color:#f66;padding:20px">' + e.stack + '</pre>';
+        });
+    </script>
+</body>
+</html>

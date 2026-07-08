@@ -187,24 +187,63 @@ fn load_assets(canvas_w: u32, canvas_h: u32) -> Vec<SceneAsset> {
         load(
             "Ghostscript Tiger",
             include_str!("../../../assets/Ghostscript_Tiger.svg"),
-            3.0,
-            canvas_w,
-            canvas_h,
-        ),
-        load(
-            "SVG Logo",
-            include_str!("../../../assets/SVG_Logo.svg"),
             2.0,
             canvas_w,
             canvas_h,
         ),
         load(
-            "Bismillah",
-            include_str!("../../../assets/bismillah.svg"),
+            "Binus University",
+            include_str!("../../../assets/Binus_University.svg"),
             2.0,
             canvas_w,
             canvas_h,
         ),
+        load(
+            "Garuda",
+            include_str!("../../../assets/Garuda.svg"),
+            2.0,
+            canvas_w,
+            canvas_h,
+        ),
+        load(
+            "Peta Paris",
+            include_str!("../../../assets/paris-30k.svg"),
+            1.0,
+            canvas_w,
+            canvas_h,
+        ),
+        load(
+            "Real Madrid",
+            include_str!("../../../assets/Real_Madrid_CF.svg"),
+            2.0,
+            canvas_w,
+            canvas_h,
+        ),
+   
+        load(
+            "Declaration Of Independence",
+            include_str!("../../../assets/United_States_Declaration_of_Independence.svg"),
+            1.0,
+            canvas_w,
+            canvas_h,
+        ),
+
+        load(
+            "Dragon",
+            include_str!("../../../assets/2802000.svg"),
+            1.0,
+            canvas_w,
+            canvas_h,
+        ),
+
+        load(
+            "Peta Dunia",
+            include_str!("../../../assets/World_Map.svg"),
+            1.0,
+            canvas_w,
+            canvas_h,
+        ),
+        
     ]
 }
 

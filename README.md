@@ -24,6 +24,11 @@
 This template is designed for compiling Rust libraries into WebAssembly and
 publishing the resulting package to NPM.
 
+## Arabella code locations
+
+- Span/path segment creation logic: `src/concept/path.rs` in `Segment::line_to`, `Segment::quad_to`, `Segment::cubic_to`, and `Segment::encode_shape`.
+- Boundary fragment/subpath boundary marking logic: `src/concept/path.rs` in `Segment::close`, `Segment::move_to`, and `PathTag::set_subpath_end`.
+
 Be sure to check out [other `wasm-pack` tutorials online][tutorials] for other
 templates and usages of `wasm-pack`.
 

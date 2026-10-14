@@ -30,7 +30,7 @@ web-sys = {
         "WebGlVertexArrayObject",
         ]
     }
-fearless_simd = "0.4.0"
+fearless_simd = "1.1.0"
 bytemuck = { version= "1.25.0",features = ["derive"] }
 kurbo = "0.13.0"
 peniko = "0.6.0"
